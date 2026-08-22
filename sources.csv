@@ -1,0 +1,31 @@
+name,url,type,content_type
+Hacker News,https://news.ycombinator.com/rss,rss,article
+arXiv AI,https://export.arxiv.org/rss/cs.AI,rss,paper
+arXiv Security,https://export.arxiv.org/rss/cs.CR,rss,paper
+arXiv ML,https://export.arxiv.org/rss/cs.LG,rss,paper
+arXiv SE,https://export.arxiv.org/rss/cs.SE,rss,paper
+Simon Willison,https://simonwillison.net/atom.xml,rss,article
+Latent Space,https://www.latent.space/feed,rss,article
+The Batch,https://www.deeplearning.ai/the-batch/feed,rss,article
+Import AI,https://importai.substack.com/feed,rss,article
+One Useful Thing,https://www.oneusefulthing.org/feed,rss,article
+Lilian Weng,https://lilianweng.github.io/index.xml,rss,article
+Eugene Yan,https://eugeneyan.com/rss.xml,rss,article
+The Verge AI,https://www.theverge.com/ai-artificial-intelligence/rss/index.xml,rss,article
+MIT Technology Review,https://www.technologyreview.com/feed/,rss,article
+Wired AI,https://www.wired.com/tag/artificial-intelligence/feed/,rss,article
+VentureBeat AI,https://venturebeat.com/category/ai/feed/,rss,article
+TechCrunch AI,https://techcrunch.com/category/artificial-intelligence/feed/,rss,article
+Product Hunt AI,https://www.producthunt.com/feed?t=ai,rss,product
+Indie Hackers,https://www.indiehackers.com/feed,rss,article
+Papers with Code,https://paperswithcode.com/rss,rss,paper
+The Hacker News,https://thehackernews.com/feeds/posts/default,rss,article
+PortSwigger,https://portswigger.net/research/rss,rss,article
+SANS ISC,https://isc.sans.edu/rssfeed.xml,rss,article
+BleepingComputer,https://www.bleepingcomputer.com/feed/,rss,article
+GitHub Trending Python,python,github-trending,repo
+GitHub Trending Go,go,github-trending,repo
+GitHub Trending TypeScript,typescript,github-trending,repo
+GitHub Search AI Agents,ai+agent+created:>2026-08-15,github-search,repo
+GitHub Search LLM Security,llm+security+created:>2026-08-15,github-search,repo
+GitHub Search MCP,mcp+created:>2026-08-15,github-search,repo

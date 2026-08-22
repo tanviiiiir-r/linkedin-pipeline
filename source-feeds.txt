@@ -1,0 +1,29 @@
+AI news
+https://news.ycombinator.com/rss
+
+AI research papers
+https://export.arxiv.org/rss/cs.AI
+
+AI builders / indie hackers
+https://www.indiehackers.com/feed
+
+Product Hunt AI launches
+https://www.producthunt.com/feed?t=ai
+
+Reddit r/LocalLLaMA (via .rss — may be bot-gated on server)
+https://www.reddit.com/r/LocalLLaMA/.rss
+
+Lil'Log (EugeniaTKO) AI explainers
+https://lilianweng.github.io/feed.xml
+
+Andrej Karpathy blog
+https://karpathy.ai/blog/feed.xml
+
+Simon Willison's weblog (AI/LLM practical takes)
+https://simonwillison.net/atom.xml
+
+The Decoder AI news
+https://the-decoder.com/feed/
+
+Artificial Intelligence substack newsletter digest (search for popular ones)
+https://substack.com/inbox?s=rss

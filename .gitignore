@@ -1,0 +1,20 @@
+# Data / generated content (do not commit — grows fast)
+raw/
+content.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Virtual environment
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/

@@ -36,7 +36,7 @@ from pipeline.publishers.composio import (
 )
 from pipeline.publishers.linkedin import DirectLinkedInPublisher, DryRunPublisher, get_publisher
 from pipeline.scoring import is_worthy, score_item
-from pipeline.storage import Item, init_db, item_exists, save_item, update_status
+from pipeline.storage import Item, init_db, item_exists, list_items, save_item, update_status
 from pipeline.tokens import clear_tokens, load_tokens, save_tokens
 
 # Publishing targets controlled by CLI args and env
@@ -299,11 +299,106 @@ def cmd_reddit(args) -> int:
     return 0
 
 
+def cmd_daily(args) -> int:
+    """End-to-end daily run: collect -> score -> draft -> newsletter -> notify.
+    Publishing is intentionally left out; it requires explicit human approval.
+    """
+    print(f"=== Daily run started at {now_iso()} ===")
+    ensure_dirs()
+    init_db()
+
+    # 1. Collect
+    collect_total = 0
+    print("\n-- COLLECT --")
+    with SOURCES_CSV.open() as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            name = row["name"]
+            url_or_query = row["url"]
+            source_type = row["type"]
+            content_type = row["content_type"]
+            if source_type == "rss":
+                collect_total += collect_rss(name, url_or_query, content_type, dry_run=args.dry_run, limit=args.collect_limit)
+            elif source_type == "github-trending":
+                collect_total += collect_github_trending(url_or_query, dry_run=args.dry_run, limit=args.collect_limit)
+            elif source_type == "github-search":
+                collect_total += collect_github_search(url_or_query, dry_run=args.dry_run, limit=args.collect_limit)
+    if not args.skip_reddit:
+        collect_total += collect_reddit(dry_run=args.dry_run, limit_per_sub=args.collect_limit)
+    if not args.skip_youtube:
+        collect_total += collect_youtube(dry_run=args.dry_run, limit_per_channel=args.collect_limit)
+    if not args.skip_instagram:
+        collect_total += collect_instagram(dry_run=args.dry_run, limit=args.collect_limit)
+    print(f"\nCollection complete: {collect_total} new items")
+
+    # 2. Score
+    print("\n-- SCORE --")
+    items = list_items(limit=200)
+    worthy = 0
+    for item in items:
+        score = score_item(item)
+        if is_worthy(item, min_confidence=args.min_confidence, min_signal=args.min_signal):
+            worthy += 1
+            update_status(item.item_url, "worthy")
+        else:
+            update_status(item.item_url, "scored")
+    print(f"{worthy} worthy items")
+
+    # 3. Draft
+    print("\n-- DRAFT --")
+    worthy_items = [i for i in list_items(status="worthy", limit=args.draft_limit) if i.status == "worthy"]
+    drafted = 0
+    for item in worthy_items:
+        score = score_item(item)
+        draft = draft_item(item, score)
+        save_draft(draft, QUEUE_DIR)
+        update_status(item.item_url, "drafted")
+        drafted += 1
+    print(f"Drafted {drafted} items")
+
+    # 4. Newsletter
+    print("\n-- NEWSLETTER --")
+    newsletter_drafts = []
+    for item in [i for i in list_items(status="worthy", limit=args.newsletter_limit) if i.status == "worthy"]:
+        score = score_item(item)
+        newsletter_drafts.append(draft_item(item, score))
+    if newsletter_drafts:
+        newsletter = compile_newsletter(newsletter_drafts, title=args.newsletter_title)
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
+        path = NEWSLETTER_DIR / f"{ts}--newsletter.md"
+        path.write_text(newsletter)
+        print(f"Newsletter saved: {path}")
+    else:
+        print("No worthy items for newsletter")
+
+    # 5. Notify
+    print("\n-- NOTIFY --")
+    notify_daily_summary(collect_total, worthy, drafted, len(newsletter_drafts))
+
+    print(f"\n=== Daily run completed at {now_iso()} ===")
+    return 0
+
+
+# Notify stub (override later for Telegram/Discord)
+def notify_daily_summary(collected: int, worthy: int, drafted: int, newsletter_sections: int) -> None:
+    """Emit a daily summary notification. Default is stdout; override for Telegram/Discord."""
+    msg = (
+        f"Daily pipeline run complete.\n"
+        f"Collected: {collected}\n"
+        f"Worthy: {worthy}\n"
+        f"Drafted: {drafted}\n"
+        f"Newsletter sections: {newsletter_sections}\n"
+        f"Next step: review queue with `python run.py queue` and approve items to publish."
+    )
+    log_path = DATA_DIR / "daily-runs"
+    log_path.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
+    (log_path / f"{ts}.log").write_text(msg)
+    print(msg)
+
+
 def cmd_score(args) -> int:
     init_db()
-    items = []
-    # In a real run we might load un-scored items; here score latest N
-    from pipeline.storage import list_items
     items = list_items(limit=args.limit)
     worthy = 0
     for item in items:
@@ -320,7 +415,6 @@ def cmd_score(args) -> int:
 
 def cmd_draft(args) -> int:
     init_db()
-    from pipeline.storage import list_items
     items = [i for i in list_items(status="worthy", limit=args.limit) if i.status == "worthy"]
     if not items:
         print("No worthy items to draft. Run `score` first.")
@@ -510,6 +604,19 @@ def main(argv: list[str] | None = None) -> int:
     p_newsletter.add_argument("--limit", type=int, default=5)
     p_newsletter.add_argument("--title", default="Secure AI Engineering Weekly")
     p_newsletter.set_defaults(func=cmd_newsletter)
+
+    p_daily = sub.add_parser("daily", help="Run the full daily workflow: collect -> score -> draft -> newsletter -> notify")
+    p_daily.add_argument("--dry-run", action="store_true", help="Collect without saving")
+    p_daily.add_argument("--collect-limit", type=int, default=5)
+    p_daily.add_argument("--draft-limit", type=int, default=3)
+    p_daily.add_argument("--newsletter-limit", type=int, default=5)
+    p_daily.add_argument("--newsletter-title", default="Secure AI Engineering Daily")
+    p_daily.add_argument("--skip-reddit", action="store_true")
+    p_daily.add_argument("--skip-youtube", action="store_true")
+    p_daily.add_argument("--skip-instagram", action="store_true")
+    p_daily.add_argument("--min-confidence", type=int, default=30)
+    p_daily.add_argument("--min-signal", type=int, default=20)
+    p_daily.set_defaults(func=cmd_daily)
 
     p_queue = sub.add_parser("queue", help="Show approval queue")
     p_queue.add_argument("--limit", type=int, default=20)

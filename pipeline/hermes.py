@@ -20,10 +20,22 @@ from config.settings import (
 )
 from pipeline.approval import approve_draft, list_pending, list_ready_to_publish, mark_published
 from pipeline.drafting import Draft, draft_item, save_draft
-from pipeline.publishers.linkedin import DirectLinkedInPublisher, get_publisher
+from pipeline.publishers.composio import (
+    ComposioLinkedInPublisher,
+    ComposioTwitterPublisher,
+    get_composio_linkedin_publisher,
+    get_composio_twitter_publisher,
+)
+from pipeline.publishers.linkedin import DirectLinkedInPublisher, DryRunPublisher, get_publisher
 from pipeline.scoring import is_worthy, score_item
 from pipeline.storage import Item, init_db, item_exists, save_item, update_status
 from pipeline.tokens import clear_tokens, load_tokens, save_tokens
+
+# Publishing targets controlled by CLI args and env
+_PUBLISH_TARGETS = {
+    "linkedin": get_composio_linkedin_publisher,
+    "twitter": get_composio_twitter_publisher,
+}
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -313,23 +325,30 @@ def cmd_publish(args) -> int:
     if not ready:
         print("No approved drafts ready to publish.")
         return 0
-    publisher = get_publisher()
+
+    target = getattr(args, "target", "linkedin").lower()
+    publisher_factory = _PUBLISH_TARGETS.get(target)
+    if not publisher_factory:
+        print(f"Unknown publish target: {target}", file=sys.stderr)
+        return 1
+
+    publisher = publisher_factory() or DryRunPublisher()
     print(f"Publisher: {publisher.__class__.__name__}")
     published_count = 0
     for draft in ready[:args.limit]:
-        if args.dry_run and not publisher.is_configured():
-            print(f"[DRY-RUN] Would publish: {draft.item_id}")
-            result = {"ok": True, "dry_run": True}
+        if args.dry_run:
+            print(f"[DRY-RUN] Would {target}-publish: {draft.item_id}")
+            result = {"ok": True, "dry_run": True, "target": target}
         else:
             result = publisher.publish(draft)
         if result.get("ok"):
             mark_published(draft.item_id)
             update_status(draft.source_url, "published")
             published_count += 1
-            print(f"Published {draft.item_id}: {result}")
+            print(f"Published {draft.item_id} to {target}: {result}")
         else:
-            print(f"Failed {draft.item_id}: {result}")
-    print(f"\nPublished {published_count} draft(s)")
+            print(f"Failed {draft.item_id} to {target}: {result}")
+    print(f"\nPublished {published_count} draft(s) to {target}")
     return 0
 
 
@@ -419,6 +438,7 @@ def main(argv: list[str] | None = None) -> int:
     p_approve.set_defaults(func=cmd_approve)
 
     p_publish = sub.add_parser("publish", help="Publish approved drafts")
+    p_publish.add_argument("--target", choices=["linkedin", "twitter"], default="linkedin")
     p_publish.add_argument("--limit", type=int, default=1)
     p_publish.set_defaults(func=cmd_publish)
 

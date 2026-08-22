@@ -11,15 +11,21 @@ import requests
 from bs4 import BeautifulSoup
 
 from config.settings import (
+    DATA_DIR,
     LINKEDIN_CLIENT_ID,
     LINKEDIN_CLIENT_SECRET,
     LINKEDIN_REDIRECT_URI,
     MAX_RAW_CHARS,
+    NEWSLETTER_DIR,
     QUEUE_DIR,
+    RAW_DIR,
+    REQUIRE_APPROVAL,
+    SOURCES_CSV,
     ensure_dirs,
 )
 from pipeline.approval import approve_draft, list_pending, list_ready_to_publish, mark_published
-from pipeline.drafting import Draft, draft_item, save_draft
+from pipeline.collectors.reddit import REDDIT_COMMUNITIES, collect_reddit
+from pipeline.drafting import Draft, compile_newsletter, draft_item, save_draft
 from pipeline.publishers.composio import (
     ComposioLinkedInPublisher,
     ComposioTwitterPublisher,
@@ -260,7 +266,16 @@ def cmd_collect(args) -> int:
                 total += collect_github_trending(url_or_query, dry_run=args.dry_run, limit=args.limit)
             elif source_type == "github-search":
                 total += collect_github_search(url_or_query, dry_run=args.dry_run, limit=args.limit)
+    if not args.skip_reddit:
+        total += collect_reddit(dry_run=args.dry_run, limit_per_sub=args.limit)
     print(f"\nCollection complete: {total} new items")
+    return 0
+
+
+def cmd_reddit(args) -> int:
+    init_db()
+    total = collect_reddit(dry_run=args.dry_run, limit_per_sub=args.limit)
+    print(f"\nReddit collection complete: {total} new items")
     return 0
 
 
@@ -317,6 +332,30 @@ def cmd_approve(args) -> int:
         return 0
     print(f"Draft not found: {args.item_id}")
     return 1
+
+
+def cmd_newsletter(args) -> int:
+    ensure_dirs()
+    from pipeline.storage import list_items
+    items = [i for i in list_items(status="worthy", limit=args.limit) if i.status == "worthy"]
+    if not items:
+        print("No worthy items found for newsletter. Run `collect` and `score` first.")
+        return 0
+
+    drafts = []
+    for item in items:
+        score = score_item(item)
+        draft = draft_item(item, score)
+        drafts.append(draft)
+
+    newsletter = compile_newsletter(drafts, title=args.title)
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
+    filename = f"{ts}--newsletter.md"
+    path = NEWSLETTER_DIR / filename
+    path.write_text(newsletter)
+    print(f"Newsletter compiled: {path}")
+    print(f"Sections: {len(drafts)}")
+    return 0
 
 
 def cmd_publish(args) -> int:
@@ -416,8 +455,14 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command")
 
     p_collect = sub.add_parser("collect", help="Collect new items from sources")
+    p_collect.add_argument("--skip-reddit", action="store_true", help="Skip Reddit collection")
     p_collect.add_argument("--limit", type=int, default=10)
     p_collect.set_defaults(func=cmd_collect)
+
+    p_reddit = sub.add_parser("reddit", help="Collect top posts from Reddit via Composio")
+    p_reddit.add_argument("--limit", type=int, default=10)
+    p_reddit.add_argument("--dry-run", action="store_true")
+    p_reddit.set_defaults(func=cmd_reddit)
 
     p_score = sub.add_parser("score", help="Score collected items")
     p_score.add_argument("--limit", type=int, default=100)
@@ -428,6 +473,11 @@ def main(argv: list[str] | None = None) -> int:
     p_draft = sub.add_parser("draft", help="Draft posts for worthy items")
     p_draft.add_argument("--limit", type=int, default=5)
     p_draft.set_defaults(func=cmd_draft)
+
+    p_newsletter = sub.add_parser("newsletter", help="Compile a newsletter from worthy items")
+    p_newsletter.add_argument("--limit", type=int, default=5)
+    p_newsletter.add_argument("--title", default="Secure AI Engineering Weekly")
+    p_newsletter.set_defaults(func=cmd_newsletter)
 
     p_queue = sub.add_parser("queue", help="Show approval queue")
     p_queue.add_argument("--limit", type=int, default=20)

@@ -1,9 +1,13 @@
-"""Generate LinkedIn post + optional newsletter snippet from a scored item."""
-import json
+"""Generate LinkedIn post + newsletter snippet from a scored item.
+
+This module replaces the earlier rule-based drafting with a cleaner, humanized
+output. It also produces derivative formats: short LinkedIn post, newsletter
+section, and optional "pills" (data/forward-looking/narrative snippets).
+"""
+import html
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-
 from typing import Optional
 
 from pydantic import BaseModel
@@ -15,77 +19,136 @@ from pipeline.storage import Item
 class Draft(BaseModel):
     item_id: str
     pillar: str
-    linkedin_post: str
-    newsletter_section: str
-    hashtags: list[str]
+    title: str
     source_url: str
     created_at: str
     approved: bool = False
     published: bool = False
+    linkedin_post: str = ""
+    newsletter_section: str = ""
+    short_pill: str = ""      # 1-2 sentence takeaway (like an infographic caption)
+    forward_pill: str = ""    # "what this enables next"
+    narrative_pill: str = "" # storytelling version
+    hashtags: list[str] = []
 
 
-def draft_item(item: Item, score: ScoreResult) -> Draft:
-    """Rule-based draft. Hermes can later replace this with LLM-driven drafting."""
-    title = item.item_title.strip()
-    url = item.item_url
+PILLAR_HASHTAGS = {
+    "tool_drop": ["#AI", "#BuilderTools", "#MachineLearning"],
+    "viral_explained": ["#AI", "#TechTrends", "#Explainer"],
+    "pattern_spotting": ["#AI", "#PatternSpotting", "#EmergingTech"],
+    "builder_memo": ["#AI", "#BuilderMemo", "#DevTips"],
+    "tomorrow_in_ai": ["#AI", "#FutureOfAI", "#ThoughtLeadership"],
+}
 
-    hooks = {
-        "tool_drop": f"New tool alert: {title}",
-        "viral_explained": f"Everyone is talking about {title} — here's why it matters for builders.",
-        "pattern_spotting": f"I'm seeing a pattern: {title} is part of a bigger shift.",
-        "builder_memo": f"Builder memo: {title}",
-        "tomorrow_in_ai": f"One question {title} made me ask about the future of AI building.",
-    }
-    hook = hooks.get(score.pillar, title)
 
-    hashtags = _hashtags_for(score.pillar, item.topics)
+_PILLAR_HOOKS = {
+    "tool_drop": "New tool alert",
+    "viral_explained": "Why this matters for AI builders",
+    "pattern_spotting": "Pattern worth watching",
+    "builder_memo": "Builder memo",
+    "tomorrow_in_ai": "Tomorrow in AI",
+}
 
-    linkedin_post = f"""{hook}
 
-{score.reason}
+def _clean_text(text: str) -> str:
+    if not text:
+        return ""
+    # Unescape HTML entities
+    text = html.unescape(text)
+    # Collapse whitespace
+    text = re.sub(r"\s+", " ", text)
+    # Remove markdown link syntax but keep URL separately
+    return text.strip()
 
-What happened: {item.summary[:200] if item.summary else title}
 
-Why it matters for AI builders: {item.key_claims[0] if item.key_claims else "See the source below."}
+def _extract_claims(item: Item) -> list[str]:
+    """Return the strongest 2-3 claims from raw content."""
+    candidates = []
+    for line in item.raw_content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if len(line) > 80 and any(
+            kw in line.lower()
+            for kw in [
+                "released", "launched", "introduces", "announced", "new", "model",
+                "agent", "vulnerability", "attack", "benchmark", "api", "tool",
+                "framework", "llm", "mcp", "rag", "secure", "efficiency", "latency",
+                "quant", "fine-tune", "eval", "red-team",
+            ]
+        ):
+            candidates.append(line)
+        if len(candidates) >= 3:
+            break
+    return candidates
 
-Takeaway: watch this signal and experiment early.
 
-{url}
-
-{" ".join(hashtags)}"""
-
-    newsletter_section = f"""## {title}
-**Source:** {url}
-**Signal:** {score.reason}
-**Builder takeaway:** {item.key_claims[0] if item.key_claims else "Worth monitoring."}
-**Quote:** “{item.summary[:240] if item.summary else title}”
-"""
-
-    return Draft(
-        item_id=item.id,
-        pillar=score.pillar or "general",
-        linkedin_post=linkedin_post.strip(),
-        newsletter_section=newsletter_section.strip(),
-        hashtags=hashtags,
-        source_url=url,
-        created_at=datetime.now(timezone.utc).isoformat(),
-    )
+def _summarize_why(item: Item) -> str:
+    claims = _extract_claims(item)
+    if claims:
+        return claims[0]
+    return item.summary or item.item_title
 
 
 def _hashtags_for(pillar: str, topics: list[str]) -> list[str]:
-    base = {
-        "tool_drop": ["#AI", "#BuilderTools", "#MachineLearning"],
-        "viral_explained": ["#AI", "#TechTrends", "#Explainer"],
-        "pattern_spotting": ["#AI", "#PatternSpotting", "#EmergingTech"],
-        "builder_memo": ["#AI", "#BuilderMemo", "#DevTips"],
-        "tomorrow_in_ai": ["#AI", "#FutureOfAI", "#ThoughtLeadership"],
-    }
-    tags = base.get(pillar, ["#AI", "#MachineLearning"]).copy()
+    tags = PILLAR_HASHTAGS.get(pillar, ["#AI", "#MachineLearning"]).copy()
     for t in topics[:2]:
         clean = "".join(c for c in t if c.isalnum())
-        if clean:
+        if clean and f"#{clean.title()}" not in tags:
             tags.append(f"#{clean.title()}")
     return list(dict.fromkeys(tags))[:5]
+
+
+def draft_item(item: Item, score: ScoreResult) -> Draft:
+    """Create a human-sounding draft with derivative pills."""
+    title = _clean_text(item.item_title)
+    url = item.item_url
+    why = _summarize_why(item)
+    pillar = score.pillar or "general"
+    hook = _PILLAR_HOOKS.get(pillar, "AI signal")
+    hashtags = _hashtags_for(pillar, item.topics)
+
+    linkedin_post = f"""{hook}: {title}
+
+What changed: {why[:240]}
+
+Why builders should care: this is the kind of signal that shifts how we design, deploy, and secure AI systems. Watch it, experiment with it, and share what breaks.
+
+Read more: {url}
+
+{" ".join(hashtags)}""".strip()
+
+    newsletter_section = f"""## {title}
+
+**Source:** {url}
+**Signal strength:** {pillar.replace('_', ' ').title()} — {score.pillar_confidence}% confidence
+
+**What changed:** {why[:300]}
+
+**Builder takeaway:** {item.key_claims[0] if item.key_claims else 'Worth monitoring closely.'}
+
+**Security / reliability angle:** {item.key_claims[1] if len(item.key_claims) > 1 else 'Consider how this behaves under misuse, scaling pressure, or adversarial input.'}
+
+**Efficiency / cost angle:** {item.key_claims[2] if len(item.key_claims) > 2 else 'Track the implementation cost and operational overhead as it matures.'}
+""".strip()
+
+    short_pill = f"{title}: {why[:160]}"
+    forward_pill = f"If {title.split(' ')[0]} keeps moving this fast, the next 6 months will redefine how teams ship {pillar.replace('_', ' ')} workflows."
+    narrative_pill = f"A builder I follow flagged '{title}'. Here's why I paused: {why[:200]}"
+
+    return Draft(
+        item_id=item.id,
+        pillar=pillar,
+        title=title,
+        source_url=url,
+        created_at=datetime.now(timezone.utc).isoformat(),
+        linkedin_post=linkedin_post,
+        newsletter_section=newsletter_section,
+        short_pill=short_pill,
+        forward_pill=forward_pill,
+        narrative_pill=narrative_pill,
+        hashtags=hashtags,
+    )
 
 
 def save_draft(draft: Draft, queue_dir: Path) -> Path:
@@ -101,6 +164,7 @@ def _draft_markdown(draft: Draft) -> str:
     return f"""---
 item_id: {draft.item_id}
 pillar: {draft.pillar}
+title: {draft.title}
 source_url: {draft.source_url}
 created_at: {draft.created_at}
 approved: {draft.approved}
@@ -114,14 +178,24 @@ hashtags: {', '.join(draft.hashtags)}
 ## Newsletter Section
 {draft.newsletter_section}
 
+## Short Pill
+{draft.short_pill}
+
+## Forward Pill
+{draft.forward_pill}
+
+## Narrative Pill
+{draft.narrative_pill}
+
 ## Actions
 - [ ] Approved by human
 - [ ] Published to LinkedIn
+- [ ] Published to Twitter/X
 """
 
 
 def load_drafts(queue_dir: Path) -> list[Draft]:
-    """Load full drafts from queue markdown files, preserving post body."""
+    """Load full drafts from queue markdown files."""
     drafts = []
     if not queue_dir.exists():
         return drafts
@@ -134,7 +208,6 @@ def load_drafts(queue_dir: Path) -> list[Draft]:
 
 
 def _split_frontmatter(text: str) -> tuple[Optional[str], Optional[str]]:
-    """Return (frontmatter, body) for a YAML --- delimited markdown file."""
     m = re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", text, re.DOTALL)
     if not m:
         return None, None
@@ -142,7 +215,6 @@ def _split_frontmatter(text: str) -> tuple[Optional[str], Optional[str]]:
 
 
 def _parse_draft_markdown(text: str) -> Optional[Draft]:
-    """Parse frontmatter + body sections into a Draft object."""
     frontmatter, body = _split_frontmatter(text)
     if not frontmatter:
         return None
@@ -152,7 +224,6 @@ def _parse_draft_markdown(text: str) -> Optional[Draft]:
             k, v = line.split(":", 1)
             data[k.strip()] = v.strip()
 
-    # Extract sections from body
     sections: dict[str, str] = {}
     current_heading = None
     current_lines: list[str] = []
@@ -171,11 +242,28 @@ def _parse_draft_markdown(text: str) -> Optional[Draft]:
     return Draft(
         item_id=data.get("item_id", ""),
         pillar=data.get("pillar", ""),
+        title=data.get("title", ""),
         source_url=data.get("source_url", ""),
         created_at=data.get("created_at", ""),
         approved=data.get("approved", "false").lower() == "true",
         published=data.get("published", "false").lower() == "true",
         linkedin_post=sections.get("LinkedIn Post", ""),
         newsletter_section=sections.get("Newsletter Section", ""),
+        short_pill=sections.get("Short Pill", ""),
+        forward_pill=sections.get("Forward Pill", ""),
+        narrative_pill=sections.get("Narrative Pill", ""),
         hashtags=[t.strip() for t in data.get("hashtags", "").split(",") if t.strip()],
     )
+
+
+def compile_newsletter(drafts: list[Draft], title: str = "Secure AI Engineering Weekly") -> str:
+    """Compile approved drafts into a single newsletter markdown document."""
+    sections = [
+        f"# {title}",
+        f"_Compiled at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_",
+        "",
+    ]
+    for d in drafts:
+        sections.append(d.newsletter_section)
+        sections.append("")
+    return "\n".join(sections).strip()

@@ -11,7 +11,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.getenv("DATA_DIR", REPO_ROOT / "data")).expanduser()
 RAW_DIR = DATA_DIR / "raw"
 QUEUE_DIR = DATA_DIR / "queue"
+NEWSLETTER_DIR = DATA_DIR / "newsletters"
 DB_PATH = DATA_DIR / "content.db"
+SOURCES_CSV = REPO_ROOT / "sources.csv"
 
 # Supabase PostgreSQL backend (optional; falls back to local SQLite if not set)
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
@@ -42,5 +44,5 @@ REQUIRE_APPROVAL = os.getenv("REQUIRE_APPROVAL", "true").lower() in ("1", "true"
 
 
 def ensure_dirs():
-    for d in (DATA_DIR, RAW_DIR, QUEUE_DIR):
+    for d in (DATA_DIR, RAW_DIR, QUEUE_DIR, NEWSLETTER_DIR):
         d.mkdir(parents=True, exist_ok=True)

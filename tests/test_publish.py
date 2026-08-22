@@ -33,6 +33,7 @@ def make_draft(approved: bool = True) -> Draft:
     return Draft(
         item_id="abc123",
         pillar="tool_drop",
+        title="Test title",
         linkedin_post="Test post",
         newsletter_section="Test newsletter",
         hashtags=["#AI"],

@@ -36,6 +36,11 @@ class Item(BaseModel):
     status: str = "raw"
     signal_strength: str = "auto"
     url_hash: str = ""
+    reddit_score: int = 0
+    reddit_comments: int = 0
+    reddit_permalink: str = ""
+
+    model_config = {"extra": "ignore"}
 
     def model_post_init(self, __context):
         if not self.url_hash:
@@ -194,14 +199,14 @@ def load_item(url: str) -> Optional[Item]:
     conn.close()
     if not row:
         return None
-    return Item(**{k: _json_loads(k, row[k]) for k in row.keys()})
+    return _item_from_row(row)
 
 
 def list_items(status: Optional[str] = None, limit: int = 100) -> list[Item]:
     sb = _supabase_storage()
     if sb:
         rows = sb.list_items(status=status, limit=limit)
-        return [Item(**{k: _json_loads(k, row.get(k)) for k in row.keys()}) for row in rows]
+        return [_item_from_row({k: row.get(k) for k in row.keys()}) for row in rows]
     conn = _connection()
     if status:
         rows = conn.execute(
@@ -213,7 +218,7 @@ def list_items(status: Optional[str] = None, limit: int = 100) -> list[Item]:
             "SELECT * FROM items ORDER BY collected_at DESC LIMIT ?", (limit,)
         ).fetchall()
     conn.close()
-    return [Item(**{k: _json_loads(k, row[k]) for k in row.keys()}) for row in rows]
+    return [_item_from_row(row) for row in rows]
 
 
 def update_status(url: str, status: str) -> None:
@@ -235,6 +240,28 @@ def _slugify(text: str, max_len: int = 60) -> str:
     text = re.sub(r"[^\w\s-]", "", text).strip().lower()
     text = re.sub(r"[-\s]+", "-", text)
     return text[:max_len]
+
+
+def _item_from_row(row) -> Item:
+    data: dict = {}
+    for key in row.keys():
+        value = row[key]
+        if value is None:
+            data[key] = [] if key in ("key_claims", "pillar_candidates", "topics") else "" if key in ("reddit_permalink",) else 0 if key in ("reddit_score", "reddit_comments") else value
+            continue
+        if key in ("key_claims", "pillar_candidates", "topics"):
+            try:
+                data[key] = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                data[key] = []
+        elif key in ("reddit_score", "reddit_comments"):
+            try:
+                data[key] = int(value)
+            except (ValueError, TypeError):
+                data[key] = 0
+        else:
+            data[key] = value
+    return Item(**data)
 
 
 def _json_loads(key: str, value):

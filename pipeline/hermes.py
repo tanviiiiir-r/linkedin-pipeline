@@ -27,8 +27,10 @@ from pipeline.approval import approve_draft, list_pending, list_ready_to_publish
 from pipeline.collectors.instagram import collect_instagram
 from pipeline.collectors.reddit import REDDIT_COMMUNITIES, collect_reddit
 from pipeline.collectors.youtube import YOUTUBE_CHANNELS, collect_youtube
+from pipeline.checkpoints import write_daily_checkpoint
 from pipeline.dedupe import canonical_url, find_duplicate, is_duplicate
-from pipeline.drafting import Draft, compile_newsletter, draft_item, save_draft
+from pipeline.drafting import Draft, compile_newsletter, draft_item, load_drafts, save_draft
+from pipeline.invariants import run_health_checks
 from pipeline.publishers.composio import (
     ComposioLinkedInPublisher,
     ComposioTwitterPublisher,
@@ -40,6 +42,7 @@ from pipeline.scoring import is_worthy, score_item
 from pipeline.storage import Item, init_db, item_exists, list_items, save_item, update_status
 from pipeline.tokens import clear_tokens, load_tokens, save_tokens
 from pipeline.topics import extract_topics, hashtags_from_topics
+from pipeline.verify import format_verdict, verify_draft
 
 # Publishing targets controlled by CLI args and env
 _PUBLISH_TARGETS = {
@@ -313,16 +316,17 @@ def cmd_reddit(args) -> int:
 
 
 def cmd_daily(args) -> int:
-    """End-to-end daily run: collect -> score -> draft -> newsletter -> notify.
+    """End-to-end daily run: collect -> score -> draft -> verify -> newsletter -> checkpoint.
     Publishing is intentionally left out; it requires explicit human approval.
     """
     print(f"=== Daily run started at {now_iso()} ===")
     ensure_dirs()
     init_db()
+    source_errors: list[str] = []
 
     # 1. Collect
-    collect_total = 0
     print("\n-- COLLECT --")
+    collect_total = 0
     with SOURCES_CSV.open() as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -330,27 +334,38 @@ def cmd_daily(args) -> int:
             url_or_query = row["url"]
             source_type = row["type"]
             content_type = row["content_type"]
-            if source_type == "rss":
-                collect_total += collect_rss(name, url_or_query, content_type, dry_run=args.dry_run, limit=args.collect_limit)
-            elif source_type == "github-trending":
-                collect_total += collect_github_trending(url_or_query, dry_run=args.dry_run, limit=args.collect_limit)
-            elif source_type == "github-search":
-                collect_total += collect_github_search(url_or_query, dry_run=args.dry_run, limit=args.collect_limit)
+            try:
+                if source_type == "rss":
+                    collect_total += collect_rss(name, url_or_query, content_type, dry_run=args.dry_run, limit=args.collect_limit)
+                elif source_type == "github-trending":
+                    collect_total += collect_github_trending(url_or_query, dry_run=args.dry_run, limit=args.collect_limit)
+                elif source_type == "github-search":
+                    collect_total += collect_github_search(url_or_query, dry_run=args.dry_run, limit=args.collect_limit)
+            except Exception as e:
+                source_errors.append(f"{name}: {e}")
     if not args.skip_reddit:
-        collect_total += collect_reddit(dry_run=args.dry_run, limit_per_sub=args.collect_limit)
+        try:
+            collect_total += collect_reddit(dry_run=args.dry_run, limit_per_sub=args.collect_limit)
+        except Exception as e:
+            source_errors.append(f"reddit: {e}")
     if not args.skip_youtube:
-        collect_total += collect_youtube(dry_run=args.dry_run, limit_per_channel=args.collect_limit)
+        try:
+            collect_total += collect_youtube(dry_run=args.dry_run, limit_per_channel=args.collect_limit)
+        except Exception as e:
+            source_errors.append(f"youtube: {e}")
     if not args.skip_instagram:
-        collect_total += collect_instagram(dry_run=args.dry_run, limit=args.collect_limit)
+        try:
+            collect_total += collect_instagram(dry_run=args.dry_run, limit=args.collect_limit)
+        except Exception as e:
+            source_errors.append(f"instagram: {e}")
     print(f"\nCollection complete: {collect_total} new items")
 
-# 2. Score
+    # 2. Score
     print("\n-- SCORE --")
     items = list_items(limit=200)
     worthy = 0
     for item in items:
         score = score_item(item)
-        # Attach topics to item for downstream dedupe/drafting
         if score.topics:
             item.topics = score.topics
         if is_worthy(item, min_confidence=args.min_confidence, min_signal=args.min_signal):
@@ -364,15 +379,29 @@ def cmd_daily(args) -> int:
     print("\n-- DRAFT --")
     worthy_items = [i for i in list_items(status="worthy", limit=args.draft_limit) if i.status == "worthy"]
     drafted = 0
+    drafts: list[Draft] = []
     for item in worthy_items:
         score = score_item(item)
         draft = draft_item(item, score)
         save_draft(draft, QUEUE_DIR)
         update_status(item.item_url, "drafted")
+        drafts.append(draft)
         drafted += 1
     print(f"Drafted {drafted} items")
 
-    # 4. Newsletter
+    # 4. Verify drafts (L4-style)
+    print("\n-- VERIFY --")
+    verified = 0
+    rejected = 0
+    for draft in drafts:
+        result = verify_draft(draft)
+        print(f"  [{draft.item_id[:8]}] {result.verdict.value} ({result.score}/100) — {draft.title[:55]}")
+        if result.verdict.value == "APPROVE":
+            verified += 1
+        elif result.verdict.value == "REJECT":
+            rejected += 1
+
+    # 5. Newsletter
     print("\n-- NEWSLETTER --")
     newsletter_drafts = []
     for item in [i for i in list_items(status="worthy", limit=args.newsletter_limit) if i.status == "worthy"]:
@@ -387,9 +416,27 @@ def cmd_daily(args) -> int:
     else:
         print("No worthy items for newsletter")
 
-    # 5. Notify
-    print("\n-- NOTIFY --")
-    notify_daily_summary(collect_total, worthy, drafted, len(newsletter_drafts))
+    # 6. Health checks
+    print("\n-- HEALTH --")
+    health_checks = run_health_checks(collected=collect_total, source_errors=source_errors)
+    for c in health_checks:
+        symbol = "✅" if c.passed else "❌"
+        print(f"  {symbol} {c.name}: {c.message}")
+
+    # 7. Checkpoint
+    print("\n-- CHECKPOINT --")
+    checkpoint_path = write_daily_checkpoint(
+        collected=collect_total,
+        worthy=worthy,
+        drafted=drafted,
+        newsletter_sections=len(newsletter_drafts),
+        verified=verified,
+        rejected=rejected,
+        source_errors=source_errors,
+        health_checks=health_checks,
+        next_action="Review queue with `python run.py queue` and approve items to publish.",
+    )
+    print(f"Checkpoint saved: {checkpoint_path}")
 
     print(f"\n=== Daily run completed at {now_iso()} ===")
     return 0
@@ -426,6 +473,26 @@ def cmd_score(args) -> int:
         else:
             update_status(item.item_url, "scored")
     print(f"\n{worthy} worthy items out of {len(items)}")
+    return 0
+
+
+def cmd_verify(args) -> int:
+    """Verify queued or specified draft against quality gates."""
+    init_db()
+    drafts = load_drafts(QUEUE_DIR)
+    target_id = getattr(args, "item_id", None)
+
+    if target_id:
+        drafts = [d for d in drafts if d.item_id == target_id or d.item_id.startswith(target_id)]
+
+    if not drafts:
+        print("No drafts found in queue. Run `draft` first.")
+        return 1
+
+    for draft in drafts[:args.limit]:
+        result = verify_draft(draft)
+        print(f"\n[{draft.item_id}] {draft.title}")
+        print(format_verdict(result))
     return 0
 
 
@@ -621,7 +688,7 @@ def main(argv: list[str] | None = None) -> int:
     p_newsletter.add_argument("--title", default="Secure AI Engineering Weekly")
     p_newsletter.set_defaults(func=cmd_newsletter)
 
-    p_daily = sub.add_parser("daily", help="Run the full daily workflow: collect -> score -> draft -> newsletter -> notify")
+    p_daily = sub.add_parser("daily", help="Run the full daily workflow: collect -> score -> draft -> verify -> newsletter -> checkpoint")
     p_daily.add_argument("--dry-run", action="store_true", help="Collect without saving")
     p_daily.add_argument("--collect-limit", type=int, default=5)
     p_daily.add_argument("--draft-limit", type=int, default=3)
@@ -641,6 +708,11 @@ def main(argv: list[str] | None = None) -> int:
     p_approve = sub.add_parser("approve", help="Approve a draft by item_id")
     p_approve.add_argument("item_id")
     p_approve.set_defaults(func=cmd_approve)
+
+    p_verify = sub.add_parser("verify", help="Verify queued drafts against quality gates")
+    p_verify.add_argument("--limit", type=int, default=5)
+    p_verify.add_argument("item_id", nargs="?", default=None)
+    p_verify.set_defaults(func=cmd_verify)
 
     p_publish = sub.add_parser("publish", help="Publish approved drafts")
     p_publish.add_argument("--target", choices=["linkedin", "twitter"], default="linkedin")

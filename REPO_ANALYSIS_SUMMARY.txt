@@ -1,0 +1,22 @@
+linkedin-pipeline — Repo Analysis Summary
+
+What it is: A Python CLI that collects AI/security/builder content from 37 sources (RSS, Reddit, YouTube, Instagram, GitHub, big-tech blogs), scores it, drafts LinkedIn posts + newsletters, and queues for human approval before publishing.
+
+Status: Working prototype, 12 commits in one day, 26 Python files, ~3,800 LOC, 12 tests passing.
+
+Key features:
+- 37 sources including HN, arXiv, PortSwigger, Cloudflare, AWS, NVIDIA, Google, GitHub
+- 5 content pillars + 50-topic taxonomy
+- Supabase/SQLite dual storage
+- Composio LinkedIn/Twitter publishers (dry-run verified)
+- Human approval gate
+- MCP server for Hermes/IDE control
+- Token/cost: currently $0 LLM cost per run
+
+Strengths: zero-budget, broad coverage, safe dry-run defaults, fast iteration.
+
+Weaknesses: no scheduling/notifications yet, no live publish validation, broad exception handling, Instagram only pulls own account, draft quality still template-heavy.
+
+Main next steps: schedule daily run, add Telegram/Discord notification, verify one live publish, add health checks.
+
+Full report: /opt/data/linkedin-pipeline-remote/REPO_ANALYSIS.md

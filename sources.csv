@@ -19,6 +19,10 @@ PortSwigger,https://portswigger.net/research/rss,rss,article
 SANS ISC,https://isc.sans.edu/rssfeed.xml,rss,article
 BleepingComputer,https://www.bleepingcomputer.com/feed/,rss,article
 Dark Reading,https://www.darkreading.com/rss.xml,rss,article
+LangChain Blog,https://www.langchain.com/blog/rss.xml,rss,article
+Interconnects (Nathan Lambert),https://www.interconnects.ai/feed,rss,article
+OpenAI Newsroom,https://openai.com/news/rss.xml,rss,article
+Cloudflare Blog,https://blog.cloudflare.com/rss/,rss,article
 arXiv AI,http://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=10,rss,paper
 arXiv Security,http://export.arxiv.org/api/query?search_query=cat:cs.CR&sortBy=submittedDate&sortOrder=descending&max_results=10,rss,paper
 arXiv ML,http://export.arxiv.org/api/query?search_query=cat:cs.LG&sortBy=submittedDate&sortOrder=descending&max_results=10,rss,paper

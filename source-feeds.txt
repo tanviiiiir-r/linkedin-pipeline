@@ -20,6 +20,10 @@ PortSwigger — https://portswigger.net/research/rss
 SANS ISC — https://isc.sans.edu/rssfeed.xml
 BleepingComputer — https://www.bleepingcomputer.com/feed/
 Dark Reading — https://www.darkreading.com/rss.xml
+LangChain Blog — https://www.langchain.com/blog/rss.xml
+Interconnects (Nathan Lambert) — https://www.interconnects.ai/feed
+OpenAI Newsroom — https://openai.com/news/rss.xml
+Cloudflare Blog — https://blog.cloudflare.com/rss/
 arXiv AI — http://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=10
 arXiv Security — http://export.arxiv.org/api/query?search_query=cat:cs.CR&sortBy=submittedDate&sortOrder=descending&max_results=10
 arXiv ML — http://export.arxiv.org/api/query?search_query=cat:cs.LG&sortBy=submittedDate&sortOrder=descending&max_results=10
@@ -39,3 +43,19 @@ Notes
 LinkedIn, Twitter/X, Instagram, and YouTube are intentionally NOT scraped directly
 because they block this VPS. Use Composio for posting to LinkedIn/Twitter, and use
 primary sources (blogs, arXiv, GitHub) for discovery.
+
+Skipped from original source map due to no public feed or platform blocks:
+- Harrison Chase (LinkedIn only, blocked)
+- Varun Mayya (Instagram/YouTube only, blocked; Substack stale)
+- Builders Central (Instagram/YouTube only, blocked)
+- DeepLearning.AI The Batch (no public RSS)
+- Reuters Technology (blocked/401)
+- AI Explained (YouTube only, blocked)
+- Papers with Code (no active feed we could find)
+- Jeremy Howard / fast.ai (feed 404)
+- Sebastian Raschka (feed 406)
+- Max Woolf / minimaxir (feed 404)
+- Anthropic (no public RSS found)
+- Perplexity Blog (403)
+- Microsoft AI Blog (403)
+- Google DeepMind Blog (404)

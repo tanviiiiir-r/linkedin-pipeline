@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from pipeline.scoring import ScoreResult
 from pipeline.storage import Item
+from pipeline.topics import extract_topics, hashtags_from_topics
 
 
 class Draft(BaseModel):
@@ -106,7 +107,9 @@ def draft_item(item: Item, score: ScoreResult) -> Draft:
     why = _summarize_why(item)
     pillar = score.pillar or "general"
     hook = _PILLAR_HOOKS.get(pillar, "AI signal")
-    hashtags = _hashtags_for(pillar, item.topics)
+
+    # Use extracted topics for hashtags; fall back to pillar defaults
+    tags = hashtags_from_topics(score.topics) if score.topics else _hashtags_for(pillar, item.topics)
 
     linkedin_post = f"""{hook}: {title}
 
@@ -116,12 +119,13 @@ Why builders should care: this is the kind of signal that shifts how we design, 
 
 Read more: {url}
 
-{" ".join(hashtags)}""".strip()
+{" ".join(tags)}""".strip()
 
     newsletter_section = f"""## {title}
 
 **Source:** {url}
 **Signal strength:** {pillar.replace('_', ' ').title()} — {score.pillar_confidence}% confidence
+**Topics:** {', '.join(score.topics[:4]) if score.topics else 'general'}
 
 **What changed:** {why[:300]}
 
@@ -147,7 +151,7 @@ Read more: {url}
         short_pill=short_pill,
         forward_pill=forward_pill,
         narrative_pill=narrative_pill,
-        hashtags=hashtags,
+        hashtags=tags,
     )
 
 

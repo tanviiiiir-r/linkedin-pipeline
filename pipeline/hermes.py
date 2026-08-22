@@ -27,6 +27,7 @@ from pipeline.approval import approve_draft, list_pending, list_ready_to_publish
 from pipeline.collectors.instagram import collect_instagram
 from pipeline.collectors.reddit import REDDIT_COMMUNITIES, collect_reddit
 from pipeline.collectors.youtube import YOUTUBE_CHANNELS, collect_youtube
+from pipeline.dedupe import canonical_url, find_duplicate, is_duplicate
 from pipeline.drafting import Draft, compile_newsletter, draft_item, save_draft
 from pipeline.publishers.composio import (
     ComposioLinkedInPublisher,
@@ -38,6 +39,7 @@ from pipeline.publishers.linkedin import DirectLinkedInPublisher, DryRunPublishe
 from pipeline.scoring import is_worthy, score_item
 from pipeline.storage import Item, init_db, item_exists, list_items, save_item, update_status
 from pipeline.tokens import clear_tokens, load_tokens, save_tokens
+from pipeline.topics import extract_topics, hashtags_from_topics
 
 # Publishing targets controlled by CLI args and env
 _PUBLISH_TARGETS = {
@@ -129,12 +131,16 @@ def normalize_feed_entry(name: str, url: str, entry, content_type: str, dry_run:
             raw = ext
     raw = raw[:MAX_RAW_CHARS]
 
+    title = entry.get("title", "Untitled")
+    full_text = f"{title}\n\n{raw}"
+    topics = extract_topics(full_text, top_n=5)
+
     return Item(
         id="",
         source_name=name,
         source_url=url,
         item_url=link,
-        item_title=entry.get("title", "Untitled"),
+        item_title=title,
         item_author=entry.get("author", ""),
         published_at=entry.get("published", ""),
         source_type="rss",
@@ -142,6 +148,7 @@ def normalize_feed_entry(name: str, url: str, entry, content_type: str, dry_run:
         summary=summary,
         key_claims=extract_claims(raw),
         raw_content=raw,
+        topics=topics,
     )
 
 
@@ -152,15 +159,21 @@ def collect_rss(name: str, url: str, content_type: str, dry_run: bool = False, l
         print("  no entries")
         return 0
 
+    # Load recent items for semantic dedupe
+    recent_items = list_items(limit=500) if not dry_run else []
+
     count = 0
     for entry in feed.entries[:limit]:
         item = normalize_feed_entry(name, url, entry, content_type, dry_run=dry_run)
         if not item.item_url or item_exists(item.item_url):
             print(f"  dedupe: {item.item_title[:60]}")
             continue
+        if recent_items and find_duplicate(item, recent_items):
+            print(f"  semantic dedupe: {item.item_title[:60]}")
+            continue
         if not dry_run:
             save_item(item)
-        print(f"  saved: {item.item_title[:60]}")
+        print(f"  saved: {item.item_title[:60]} [{', '.join(item.topics[:3])}]")
         count += 1
     print(f"  {count} new")
     return count
@@ -331,12 +344,15 @@ def cmd_daily(args) -> int:
         collect_total += collect_instagram(dry_run=args.dry_run, limit=args.collect_limit)
     print(f"\nCollection complete: {collect_total} new items")
 
-    # 2. Score
+# 2. Score
     print("\n-- SCORE --")
     items = list_items(limit=200)
     worthy = 0
     for item in items:
         score = score_item(item)
+        # Attach topics to item for downstream dedupe/drafting
+        if score.topics:
+            item.topics = score.topics
         if is_worthy(item, min_confidence=args.min_confidence, min_signal=args.min_signal):
             worthy += 1
             update_status(item.item_url, "worthy")

@@ -4,6 +4,12 @@ content.db
 *.db
 *.sqlite
 *.sqlite3
+data/
+test_data/
+test_data_*/
+
+# Secrets
+.env
 
 # Virtual environment
 .venv/

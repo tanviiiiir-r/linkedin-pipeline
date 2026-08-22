@@ -24,7 +24,9 @@ from config.settings import (
     ensure_dirs,
 )
 from pipeline.approval import approve_draft, list_pending, list_ready_to_publish, mark_published
+from pipeline.collectors.instagram import collect_instagram
 from pipeline.collectors.reddit import REDDIT_COMMUNITIES, collect_reddit
+from pipeline.collectors.youtube import YOUTUBE_CHANNELS, collect_youtube
 from pipeline.drafting import Draft, compile_newsletter, draft_item, save_draft
 from pipeline.publishers.composio import (
     ComposioLinkedInPublisher,
@@ -268,7 +270,25 @@ def cmd_collect(args) -> int:
                 total += collect_github_search(url_or_query, dry_run=args.dry_run, limit=args.limit)
     if not args.skip_reddit:
         total += collect_reddit(dry_run=args.dry_run, limit_per_sub=args.limit)
+    if not args.skip_youtube:
+        total += collect_youtube(dry_run=args.dry_run, limit_per_channel=args.limit)
+    if not args.skip_instagram:
+        total += collect_instagram(dry_run=args.dry_run, limit=args.limit)
     print(f"\nCollection complete: {total} new items")
+    return 0
+
+
+def cmd_youtube(args) -> int:
+    init_db()
+    total = collect_youtube(dry_run=args.dry_run, limit_per_channel=args.limit)
+    print(f"\nYouTube collection complete: {total} new items")
+    return 0
+
+
+def cmd_instagram(args) -> int:
+    init_db()
+    total = collect_instagram(dry_run=args.dry_run, limit=args.limit)
+    print(f"\nInstagram collection complete: {total} new items")
     return 0
 
 
@@ -456,6 +476,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p_collect = sub.add_parser("collect", help="Collect new items from sources")
     p_collect.add_argument("--skip-reddit", action="store_true", help="Skip Reddit collection")
+    p_collect.add_argument("--skip-youtube", action="store_true", help="Skip YouTube collection")
+    p_collect.add_argument("--skip-instagram", action="store_true", help="Skip Instagram collection")
     p_collect.add_argument("--limit", type=int, default=10)
     p_collect.set_defaults(func=cmd_collect)
 
@@ -463,6 +485,16 @@ def main(argv: list[str] | None = None) -> int:
     p_reddit.add_argument("--limit", type=int, default=10)
     p_reddit.add_argument("--dry-run", action="store_true")
     p_reddit.set_defaults(func=cmd_reddit)
+
+    p_youtube = sub.add_parser("youtube", help="Collect recent videos from YouTube channels via Composio")
+    p_youtube.add_argument("--limit", type=int, default=3)
+    p_youtube.add_argument("--dry-run", action="store_true")
+    p_youtube.set_defaults(func=cmd_youtube)
+
+    p_instagram = sub.add_parser("instagram", help="Collect recent media from Instagram via Composio")
+    p_instagram.add_argument("--limit", type=int, default=5)
+    p_instagram.add_argument("--dry-run", action="store_true")
+    p_instagram.set_defaults(func=cmd_instagram)
 
     p_score = sub.add_parser("score", help="Score collected items")
     p_score.add_argument("--limit", type=int, default=100)

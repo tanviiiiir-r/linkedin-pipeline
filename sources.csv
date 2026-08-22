@@ -4,32 +4,35 @@ Chip Huyen,https://huyenchip.com/feed.xml,rss,article
 Eugene Yan,https://eugeneyan.com/rss/,rss,article
 Andrej Karpathy,https://karpathy.ai/blog/feed.xml,rss,article
 Simon Willison,https://simonwillison.net/atom/everything/,rss,article
-Latent Space,https://www.latent.space/feed,rss,article
-The Rundown AI,https://www.therundown.ai/feed,rss,article
-Import AI,https://importai.substack.com/feed,rss,article
-One Useful Thing,https://www.oneusefulthing.org/feed,rss,article
-Lilian Weng,https://lilianweng.github.io/index.xml,rss,article
-MIT Technology Review,https://www.technologyreview.com/feed/,rss,article
-The Verge AI,https://www.theverge.com/rss/ai-artificial-intelligence/index.xml,rss,article
-VentureBeat AI,https://venturebeat.com/category/ai/feed/,rss,article
+Latent Space,https://www.latent.space/feed.xml,rss,article
 TechCrunch AI,https://techcrunch.com/category/artificial-intelligence/feed/,rss,article
-Product Hunt AI,https://www.producthunt.com/feed?t=ai,rss,product
+The Rundown AI,https://www.therundown.ai/feed,rss,article
+Dark Reading,https://www.darkreading.com/rss.xml,rss,article
+BleepingComputer,https://www.bleepingcomputer.com/feed/,rss,article
 The Hacker News,https://thehackernews.com/feeds/posts/default,rss,article
 PortSwigger,https://portswigger.net/research/rss,rss,article
 SANS ISC,https://isc.sans.edu/rssfeed.xml,rss,article
-BleepingComputer,https://www.bleepingcomputer.com/feed/,rss,article
-Dark Reading,https://www.darkreading.com/rss.xml,rss,article
+Product Hunt AI,https://www.producthunt.com/feed?t=ai,rss,product
 LangChain Blog,https://www.langchain.com/blog/rss.xml,rss,article
-Interconnects (Nathan Lambert),https://www.interconnects.ai/feed,rss,article
-OpenAI Newsroom,https://openai.com/news/rss.xml,rss,article
-Cloudflare Blog,https://blog.cloudflare.com/rss/,rss,article
-arXiv AI,http://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=10,rss,paper
-arXiv Security,http://export.arxiv.org/api/query?search_query=cat:cs.CR&sortBy=submittedDate&sortOrder=descending&max_results=10,rss,paper
-arXiv ML,http://export.arxiv.org/api/query?search_query=cat:cs.LG&sortBy=submittedDate&sortOrder=descending&max_results=10,rss,paper
-arXiv SE,http://export.arxiv.org/api/query?search_query=cat:cs.SE&sortBy=submittedDate&sortOrder=descending&max_results=10,rss,paper
-GitHub Trending Python,python,github-trending,repo
-GitHub Trending Go,go,github-trending,repo
-GitHub Trending TypeScript,typescript,github-trending,repo
-GitHub Search AI Agents,ai+agent+created:>2026-08-15,github-search,repo
-GitHub Search LLM Security,llm+security+created:>2026-08-15,github-search,repo
-GitHub Search MCP,mcp+created:>2026-08-15,github-search,repo
+Interconnects,https://www.interconnects.ai/feed,rss,article
+Google Cloud AI,https://cloudblog.withgoogle.com/products/ai-machine-learning/rss/,rss,article
+Google Developers,https://developers.googleblog.com/feeds/posts/default,rss,article
+Google Cloud Data,https://cloud.google.com/blog/products/data-analytics/rss,rss,article
+NVIDIA Developer,https://developer.nvidia.com/blog/feed/,rss,article
+AWS ML Blog,https://aws.amazon.com/blogs/machine-learning/feed/,rss,article
+AWS Security Blog,https://aws.amazon.com/blogs/security/feed/,rss,article
+AWS News AI,https://aws.amazon.com/blogs/aws/category/artificial-intelligence/feed/,rss,article
+Cloudflare AI,https://blog.cloudflare.com/tag/ai/rss/,rss,article
+Cloudflare Security,https://blog.cloudflare.com/tag/security/rss/,rss,article
+GitHub Engineering,https://github.blog/feed/,rss,article
+GitHub Security,https://github.blog/tag/security/feed/,rss,article
+DeepMind Blog,https://deepmind.google/blog/feed/,rss,article
+Pinterest Engineering,https://medium.com/feed/@Pinterest_Engineering,rss,article
+arXiv AI,http://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=20,rss,paper
+arXiv Security,http://export.arxiv.org/api/query?search_query=cat:cs.CR&sortBy=submittedDate&sortOrder=descending&max_results=20,rss,paper
+arXiv SE,http://export.arxiv.org/api/query?search_query=cat:cs.SE&sortBy=submittedDate&sortOrder=descending&max_results=20,rss,paper
+GitHub Trending python,python,github-trending,repo
+GitHub Trending typescript,typescript,github-trending,repo
+GitHub Trending go,go,github-trending,repo
+GitHub Search: ai+agent,ai+agent+created:>2026-08-15,github-search,repo
+GitHub Search: llm+security,llm+security+created:>2026-08-15,github-search,repo

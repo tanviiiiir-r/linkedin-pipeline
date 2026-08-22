@@ -3,59 +3,67 @@ RSS feeds
 Hacker News — https://news.ycombinator.com/rss
 Chip Huyen — https://huyenchip.com/feed.xml
 Eugene Yan — https://eugeneyan.com/rss/
-Andrej Karpathy — https://karpathy.ai/blog/feed.xml
+Andrej Karpathy — https://karpathy.ai/blog/feed.xml (currently empty)
 Simon Willison — https://simonwillison.net/atom/everything/
-Latent Space — https://www.latent.space/feed
-The Rundown AI — https://www.therundown.ai/feed
-Import AI — https://importai.substack.com/feed
-One Useful Thing — https://www.oneusefulthing.org/feed
-Lilian Weng — https://lilianweng.github.io/index.xml
-MIT Technology Review — https://www.technologyreview.com/feed/
-The Verge AI — https://www.theverge.com/rss/ai-artificial-intelligence/index.xml
-VentureBeat AI — https://venturebeat.com/category/ai/feed/
+Latent Space — https://www.latent.space/feed.xml
 TechCrunch AI — https://techcrunch.com/category/artificial-intelligence/feed/
-Product Hunt AI — https://www.producthunt.com/feed?t=ai
+The Rundown AI — https://www.therundown.ai/feed
+Dark Reading — https://www.darkreading.com/rss.xml
+BleepingComputer — https://www.bleepingcomputer.com/feed/
 The Hacker News — https://thehackernews.com/feeds/posts/default
 PortSwigger — https://portswigger.net/research/rss
 SANS ISC — https://isc.sans.edu/rssfeed.xml
-BleepingComputer — https://www.bleepingcomputer.com/feed/
-Dark Reading — https://www.darkreading.com/rss.xml
+Product Hunt AI — https://www.producthunt.com/feed?t=ai
 LangChain Blog — https://www.langchain.com/blog/rss.xml
-Interconnects (Nathan Lambert) — https://www.interconnects.ai/feed
-OpenAI Newsroom — https://openai.com/news/rss.xml
-Cloudflare Blog — https://blog.cloudflare.com/rss/
-arXiv AI — http://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=10
-arXiv Security — http://export.arxiv.org/api/query?search_query=cat:cs.CR&sortBy=submittedDate&sortOrder=descending&max_results=10
-arXiv ML — http://export.arxiv.org/api/query?search_query=cat:cs.LG&sortBy=submittedDate&sortOrder=descending&max_results=10
-arXiv SE — http://export.arxiv.org/api/query?search_query=cat:cs.SE&sortBy=submittedDate&sortOrder=descending&max_results=10
+Interconnects — https://www.interconnects.ai/feed
+Google Cloud AI — https://cloudblog.withgoogle.com/products/ai-machine-learning/rss/
+Google Developers — https://developers.googleblog.com/feeds/posts/default
+Google Cloud Data — https://cloud.google.com/blog/products/data-analytics/rss
+NVIDIA Developer — https://developer.nvidia.com/blog/feed/
+AWS ML Blog — https://aws.amazon.com/blogs/machine-learning/feed/
+AWS Security Blog — https://aws.amazon.com/blogs/security/feed/
+AWS News AI — https://aws.amazon.com/blogs/aws/category/artificial-intelligence/feed/
+Cloudflare AI — https://blog.cloudflare.com/tag/ai/rss/
+Cloudflare Security — https://blog.cloudflare.com/tag/security/rss/
+GitHub Engineering — https://github.blog/feed/
+GitHub Security — https://github.blog/tag/security/feed/
+DeepMind Blog — https://deepmind.google/blog/feed/
+Pinterest Engineering — https://medium.com/feed/@Pinterest_Engineering
+arXiv AI — http://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=20
+arXiv Security — http://export.arxiv.org/api/query?search_query=cat:cs.CR&sortBy=submittedDate&sortOrder=descending&max_results=20
+arXiv SE — http://export.arxiv.org/api/query?search_query=cat:cs.SE&sortBy=submittedDate&sortOrder=descending&max_results=20
 
-GitHub sources
-==============
-Trending Python — https://github.com/trending/python?since=daily
-Trending Go — https://github.com/trending/go?since=daily
-Trending TypeScript — https://github.com/trending/typescript?since=daily
-Search AI Agents — repositories created in last 7 days, sorted by stars
-Search LLM Security — repositories created in last 7 days, sorted by stars
-Search MCP — repositories created in last 7 days, sorted by stars
+GitHub
+======
+Trending: python, typescript, go
+Search: ai+agent, llm+security
 
-Notes
-=====
-LinkedIn, Twitter/X, Instagram, and YouTube are intentionally NOT scraped directly
-because they block this VPS. Use Composio for posting to LinkedIn/Twitter, and use
-primary sources (blogs, arXiv, GitHub) for discovery.
+YouTube
+=======
+Andrej Karpathy — @AndrejKarpathy
+AI Explained — @aiexplained-official
+Two Minute Papers — @TwoMinutePapers
+Yannic Kilcher — @YannicKilcher
 
-Skipped from original source map due to no public feed or platform blocks:
-- Harrison Chase (LinkedIn only, blocked)
-- Varun Mayya (Instagram/YouTube only, blocked; Substack stale)
-- Builders Central (Instagram/YouTube only, blocked)
-- DeepLearning.AI The Batch (no public RSS)
-- Reuters Technology (blocked/401)
-- AI Explained (YouTube only, blocked)
-- Papers with Code (no active feed we could find)
-- Jeremy Howard / fast.ai (feed 404)
-- Sebastian Raschka (feed 406)
-- Max Woolf / minimaxir (feed 404)
-- Anthropic (no public RSS found)
-- Perplexity Blog (403)
-- Microsoft AI Blog (403)
-- Google DeepMind Blog (404)
+Instagram
+=========
+Connected account: techwith_tanvir (currently no media)
+
+Reddit communities
+==================
+LocalLLaMA, MachineLearning, singularity, artificial, ai_agents, LLMDevs, LangChain, Rag, Vectordatabase, LocalLLM, datascience, hackernews, cybersecurity, netsec
+
+Skipped / unreachable
+=====================
+- Harrison Chase LinkedIn → replaced by LangChain Blog
+- DeepLearning.AI The Batch → no public RSS
+- Reuters Technology → blocked/401
+- OpenAI Newsroom → feed returns 403 from this VPS
+- Microsoft blogs → 403/empty feed from this VPS
+- Meta AI blog → 404
+- Anthropic news → no public RSS found
+- Papers with Code → no RSS/API
+- Varun Mayya / Builders Central Instagram → no public API feed
+- Sebastian Raschka / Jeremy Howard YouTube handles → not resolvable via API
+
+Last verified: 2026-08-22

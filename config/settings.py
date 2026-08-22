@@ -13,6 +13,10 @@ RAW_DIR = DATA_DIR / "raw"
 QUEUE_DIR = DATA_DIR / "queue"
 DB_PATH = DATA_DIR / "content.db"
 
+# Supabase PostgreSQL backend (optional; falls back to local SQLite if not set)
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+
 # LinkedIn auth (free API v2 products: Share on LinkedIn + Sign In with LinkedIn using OpenID Connect)
 LINKEDIN_CLIENT_ID = os.getenv("LINKEDIN_CLIENT_ID", "")
 LINKEDIN_CLIENT_SECRET = os.getenv("LINKEDIN_CLIENT_SECRET", "")

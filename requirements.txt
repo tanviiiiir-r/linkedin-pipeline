@@ -9,3 +9,4 @@ mcp>=1.6.0
 uvicorn>=0.30.0
 fastapi>=0.115.0
 sse-starlette>=2.1.0
+supabase>=2.7.0

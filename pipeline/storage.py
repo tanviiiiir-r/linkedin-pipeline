@@ -10,6 +10,12 @@ from pydantic import BaseModel, Field
 
 from config.settings import DB_PATH, RAW_DIR, ensure_dirs
 
+# Optional Supabase PostgreSQL backend
+try:
+    from pipeline.storage_supabase import SupabaseStorage, get_storage as _get_supabase_storage
+except Exception as _supabase_err:
+    _get_supabase_storage = lambda: None
+
 
 class Item(BaseModel):
     id: str = ""
@@ -81,7 +87,20 @@ def init_db() -> None:
     conn.close()
 
 
+def _supabase_storage() -> Optional["SupabaseStorage"]:
+    try:
+        s = _get_supabase_storage()
+        if s and s.is_available():
+            return s
+    except Exception:
+        pass
+    return None
+
+
 def item_exists(url: str) -> bool:
+    sb = _supabase_storage()
+    if sb:
+        return sb.item_exists(url)
     h = url_hash(url)
     conn = _connection()
     cur = conn.execute("SELECT 1 FROM items WHERE item_url = ? OR url_hash = ?", (url, h))
@@ -91,7 +110,10 @@ def item_exists(url: str) -> bool:
 
 
 def save_item(item: Item) -> Path:
-    """Persist item to markdown and SQLite."""
+    """Persist item to Supabase (if configured) and local markdown/SQLite."""
+    sb = _supabase_storage()
+    if sb:
+        return sb.save_item(item)
     ensure_dirs()
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     source_slug = _slugify(item.source_name)
@@ -176,6 +198,10 @@ def load_item(url: str) -> Optional[Item]:
 
 
 def list_items(status: Optional[str] = None, limit: int = 100) -> list[Item]:
+    sb = _supabase_storage()
+    if sb:
+        rows = sb.list_items(status=status, limit=limit)
+        return [Item(**{k: _json_loads(k, row.get(k)) for k in row.keys()}) for row in rows]
     conn = _connection()
     if status:
         rows = conn.execute(
@@ -191,6 +217,10 @@ def list_items(status: Optional[str] = None, limit: int = 100) -> list[Item]:
 
 
 def update_status(url: str, status: str) -> None:
+    sb = _supabase_storage()
+    if sb:
+        sb.update_status(url, status)
+        return
     conn = _connection()
     conn.execute(
         "UPDATE items SET status = ? WHERE item_url = ? OR url_hash = ?",

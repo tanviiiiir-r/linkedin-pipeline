@@ -1,29 +1,41 @@
-AI news
-https://news.ycombinator.com/rss
+RSS feeds
+=======
+Hacker News — https://news.ycombinator.com/rss
+Chip Huyen — https://huyenchip.com/feed.xml
+Eugene Yan — https://eugeneyan.com/rss/
+Andrej Karpathy — https://karpathy.ai/blog/feed.xml
+Simon Willison — https://simonwillison.net/atom/everything/
+Latent Space — https://www.latent.space/feed
+The Rundown AI — https://www.therundown.ai/feed
+Import AI — https://importai.substack.com/feed
+One Useful Thing — https://www.oneusefulthing.org/feed
+Lilian Weng — https://lilianweng.github.io/index.xml
+MIT Technology Review — https://www.technologyreview.com/feed/
+The Verge AI — https://www.theverge.com/rss/ai-artificial-intelligence/index.xml
+VentureBeat AI — https://venturebeat.com/category/ai/feed/
+TechCrunch AI — https://techcrunch.com/category/artificial-intelligence/feed/
+Product Hunt AI — https://www.producthunt.com/feed?t=ai
+The Hacker News — https://thehackernews.com/feeds/posts/default
+PortSwigger — https://portswigger.net/research/rss
+SANS ISC — https://isc.sans.edu/rssfeed.xml
+BleepingComputer — https://www.bleepingcomputer.com/feed/
+Dark Reading — https://www.darkreading.com/rss.xml
+arXiv AI — http://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=10
+arXiv Security — http://export.arxiv.org/api/query?search_query=cat:cs.CR&sortBy=submittedDate&sortOrder=descending&max_results=10
+arXiv ML — http://export.arxiv.org/api/query?search_query=cat:cs.LG&sortBy=submittedDate&sortOrder=descending&max_results=10
+arXiv SE — http://export.arxiv.org/api/query?search_query=cat:cs.SE&sortBy=submittedDate&sortOrder=descending&max_results=10
 
-AI research papers
-https://export.arxiv.org/rss/cs.AI
+GitHub sources
+==============
+Trending Python — https://github.com/trending/python?since=daily
+Trending Go — https://github.com/trending/go?since=daily
+Trending TypeScript — https://github.com/trending/typescript?since=daily
+Search AI Agents — repositories created in last 7 days, sorted by stars
+Search LLM Security — repositories created in last 7 days, sorted by stars
+Search MCP — repositories created in last 7 days, sorted by stars
 
-AI builders / indie hackers
-https://www.indiehackers.com/feed
-
-Product Hunt AI launches
-https://www.producthunt.com/feed?t=ai
-
-Reddit r/LocalLLaMA (via .rss — may be bot-gated on server)
-https://www.reddit.com/r/LocalLLaMA/.rss
-
-Lil'Log (EugeniaTKO) AI explainers
-https://lilianweng.github.io/feed.xml
-
-Andrej Karpathy blog
-https://karpathy.ai/blog/feed.xml
-
-Simon Willison's weblog (AI/LLM practical takes)
-https://simonwillison.net/atom.xml
-
-The Decoder AI news
-https://the-decoder.com/feed/
-
-Artificial Intelligence substack newsletter digest (search for popular ones)
-https://substack.com/inbox?s=rss
+Notes
+=====
+LinkedIn, Twitter/X, Instagram, and YouTube are intentionally NOT scraped directly
+because they block this VPS. Use Composio for posting to LinkedIn/Twitter, and use
+primary sources (blogs, arXiv, GitHub) for discovery.

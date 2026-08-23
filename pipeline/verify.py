@@ -6,7 +6,6 @@ UNCERTAIN verdict with reasoning.
 """
 import re
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -190,6 +189,7 @@ def format_verdict(result: VerifyResult) -> str:
 
 if __name__ == "__main__":
     from datetime import datetime, timezone
+
     from pipeline.drafting import Draft
 
     sample = Draft(

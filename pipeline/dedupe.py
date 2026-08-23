@@ -7,7 +7,6 @@ Layered strategy:
 4. Optional: semantic similarity via embeddings (placeholder).
 """
 import re
-from typing import Optional
 
 from pipeline.storage import Item
 
@@ -104,7 +103,7 @@ def is_duplicate(item_a: Item, item_b: Item, title_threshold: float = 0.85, cont
     return False
 
 
-def find_duplicate(item: Item, candidates: list[Item]) -> Optional[Item]:
+def find_duplicate(item: Item, candidates: list[Item]) -> Item | None:
     """Return first candidate that is a duplicate of item."""
     for candidate in candidates:
         if candidate.item_url == item.item_url:

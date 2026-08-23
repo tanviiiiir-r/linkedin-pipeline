@@ -1,30 +1,20 @@
-import sys
-from pathlib import Path
+"""Tests for local item storage.
 
-repo = Path(__file__).resolve().parent.parent
-if str(repo) not in sys.path:
-    sys.path.insert(0, str(repo))
+The conftest sets DATA_DIR to test_data before any imports happen. Tests here
+only touch the test database and raw directory.
+"""
+import uuid
 
-import os
-os.environ["DATA_DIR"] = str(repo / "test_data")
-
-from pipeline.storage import Item, init_db, item_exists, save_item, load_item, list_items
+from pipeline.storage import Item, init_db, item_exists, list_items, load_item, save_item
 
 
 def test_save_and_load():
     init_db()
-    # Remove any leftover test row so this test is isolated
-    try:
-        from pipeline.storage_supabase import SupabaseStorage
-        s = SupabaseStorage()
-        if s.is_available():
-            s.client.table(s.TABLE).delete().eq("item_url", "https://example.com/post-1").execute()
-    except Exception:
-        pass
+    unique = uuid.uuid4().hex[:8]
     item = Item(
         source_name="Test Source",
         source_url="https://example.com/feed",
-        item_url="https://example.com/post-1",
+        item_url=f"https://example.com/post-{unique}",
         item_title="Test Post",
         source_type="rss",
         content_type="article",

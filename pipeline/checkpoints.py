@@ -5,11 +5,9 @@ resume, debug, or audit without scrolling CLI output.
 """
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from config.settings import DATA_DIR
 from pipeline.invariants import HealthCheck
-
 
 CHECKPOINT_DIR = DATA_DIR / "daily-runs"
 

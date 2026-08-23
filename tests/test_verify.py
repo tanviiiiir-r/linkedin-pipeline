@@ -5,9 +5,10 @@ repo = Path(__file__).resolve().parent.parent
 if str(repo) not in sys.path:
     sys.path.insert(0, str(repo))
 
-from pipeline.drafting import Draft
-from pipeline.verify import VerifyResult, Verdict, format_verdict, verify_draft
 from datetime import datetime, timezone
+
+from pipeline.drafting import Draft
+from pipeline.verify import Verdict, verify_draft
 
 
 def test_verify_approve_good_draft():

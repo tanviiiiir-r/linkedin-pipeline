@@ -14,6 +14,7 @@ Sliced so each milestone ships in one L1 BUILD pass, verified by L4 VERIFY.
 - **Loops:** L1, L4
 - **Skills:** GSD canon + tdd + modular-architecture + production-readiness + security-engineering
 - **Token budget:** 25000
+- **Status:** ✅ DONE — 2026-08-23
 
 ### M2 — MCP server auth + VPS deployment artifacts
 - **Outcome:** MCP server has bearer-token auth, deployment configs (systemd/Traefik/Docker), and is ready for install on the VPS.
@@ -24,6 +25,18 @@ Sliced so each milestone ships in one L1 BUILD pass, verified by L4 VERIFY.
 - **Loops:** L1, L3, L4
 - **Skills:** GSD canon + tdd + security-engineering + devops
 - **Token budget:** 25000
+- **Status:** pending
+
+### M2.5 — 7-day content calendar + LLM humanizer + Founder Signal
+- **Outcome:** The pipeline drafts day-appropriate, voice-aware LinkedIn posts for each day of the week, including a Saturday Founder Signal designed to attract founders.
+- **Phase (GSD):** build
+- **Files / freeze boundary:** `config/calendar.py`, `pipeline/calendar.py`, `pipeline/voice.py`, `pipeline/drafting_v2.py`, updates to `pipeline/hermes.py`, `mcp_server.py`, tests, and `.genesis/checkpoints/M2.5-*`.
+- **Demo command:** `python run.py draft-today --dry-run`
+- **Success criteria:** `draft-today` selects an item matching the current day type, generates a human-sounding LinkedIn post via LLM, validates output against Pydantic, and saves it to the queue; tests pass.
+- **Loops:** L1, L3, L4
+- **Skills:** GSD canon + tdd + modular-architecture + production-readiness
+- **Token budget:** 25000
+- **Status:** 🔄 IN PROGRESS
 
 ### M3 — VPS deploy + Hermes integration + live dry-run publish
 - **Outcome:** Repo deployed on Hostinger VPS, Hermes container can reach MCP server, full collect→score→draft→approve→publish dry-run works end-to-end.
@@ -34,11 +47,10 @@ Sliced so each milestone ships in one L1 BUILD pass, verified by L4 VERIFY.
 - **Loops:** L1, L2, L4
 - **Skills:** GSD canon + tdd + security-engineering + devops + vercel-deploy
 - **Token budget:** 25000
+- **Status:** pending
 
 ---
 
 ## Progress (loops append here on milestone completion — newest last)
 
 - M1 done — 2026-08-23: baseline review approved by L4 verifier; 3 Critical, 7 Warning, 5 Info findings recorded.
-
-- M1 in progress: source files frozen, review running.

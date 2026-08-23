@@ -1,9 +1,8 @@
 """Human-in-the-loop approval queue."""
-import shutil
 from pathlib import Path
 
-from pipeline.drafting import Draft, _draft_markdown, _parse_draft_markdown, load_drafts
 from config.settings import QUEUE_DIR
+from pipeline.drafting import Draft, _draft_markdown, _parse_draft_markdown, load_drafts
 
 
 def list_pending() -> list[Draft]:

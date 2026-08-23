@@ -5,7 +5,6 @@ source-specific boosts and lightweight anti-noise filtering.
 """
 import re
 from collections import Counter
-from typing import Optional
 
 # Taxonomy from SOURCE-MAP.md
 TAXONOMY = {
@@ -126,7 +125,7 @@ def extract_topics(text: str, top_n: int = 5, min_hits: int = 1) -> list[str]:
     return [t for t, _ in results[:top_n]]
 
 
-def primary_topic(topics: list[str]) -> Optional[str]:
+def primary_topic(topics: list[str]) -> str | None:
     return topics[0] if topics else None
 
 

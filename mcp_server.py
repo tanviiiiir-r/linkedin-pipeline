@@ -20,7 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from config.settings import DATA_DIR, MCP_AUTH_TOKEN, QUEUE_DIR, REQUIRE_APPROVAL, ensure_dirs
 from pipeline.approval import approve_draft, list_pending, list_ready_to_publish
-from pipeline.drafting import Draft
+from pipeline.drafting import Draft, save_draft
 from pipeline.hermes import cmd_collect, cmd_draft, cmd_publish, cmd_score
 from pipeline.publishers.linkedin import DirectLinkedInPublisher
 from pipeline.storage import Item, init_db, list_items
@@ -221,6 +221,59 @@ def _draft_to_dict(draft: Draft) -> dict:
         "linkedin_post": draft.linkedin_post,
         "newsletter_section": draft.newsletter_section,
     }
+
+@mcp.tool()
+def draft_today(limit: int = 1, dry_run: bool = False) -> str:
+    """Draft today's post using the 7-day calendar and LLM humanizer.
+
+    Args:
+        limit: Number of draft candidates to produce.
+        dry_run: If True, return the draft without saving it to the queue.
+    """
+    from config.calendar import day_plan
+    from pipeline.calendar import select_for_today
+    from pipeline.drafting_v2 import draft_item_v2
+    from pipeline.storage import list_items
+
+    init_db()
+    ensure_dirs()
+    plan = day_plan()
+    candidates = list_items(status="worthy", limit=limit * 5)
+    if not candidates:
+        candidates = list_items(status=None, limit=limit * 5)
+    if not candidates:
+        return json.dumps({"ok": False, "error": "No items available. Run collect and score first."}, indent=2)
+
+    selected = select_for_today(candidates, limit=limit)
+    drafts = []
+    for item, score in selected:
+        draft = draft_item_v2(item, score, day_plan=plan)
+        drafts.append(draft)
+        if not dry_run:
+            save_draft(draft, QUEUE_DIR)
+            from pipeline.storage import update_status
+            update_status(item.item_url, "drafted")
+
+    return json.dumps(
+        {
+            "ok": True,
+            "day": plan.day_name,
+            "post_type": plan.post_type,
+            "count": len(drafts),
+            "drafts": [
+                {
+                    "item_id": d.item_id,
+                    "title": d.title,
+                    "pillar": d.pillar,
+                    "hashtags": d.hashtags,
+                    "linkedin_post": d.linkedin_post,
+                }
+                for d in drafts
+            ],
+        },
+        indent=2,
+    )
+
 
 
 if __name__ == "__main__":

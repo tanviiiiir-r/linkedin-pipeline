@@ -3,23 +3,20 @@
 V2: tighter scoring that filters low-signal content (e.g. Reddit rants) and
 boosts high-signal sources. Uses topic taxonomy for relevance.
 """
-import re
-from typing import Optional
 
 from pydantic import BaseModel
 
-from config.settings import CLAIM_KEYWORDS, PILLARS
 from pipeline.storage import Item
 from pipeline.topics import extract_topics, primary_topic
 
 
 class ScoreResult(BaseModel):
-    pillar: Optional[str] = None
+    pillar: str | None = None
     pillar_confidence: int = 0  # 0-100
     signal_strength: int = 0  # 0-100
     reason: str = ""
     topics: list[str] = []
-    primary_topic: Optional[str] = None
+    primary_topic: str | None = None
 
 
 # Sources we trust to produce high-signal content
@@ -108,7 +105,7 @@ def _is_noise(item: Item, text: str) -> bool:
     return False
 
 
-def _best_pillar(text: str, topics: list[str]) -> tuple[Optional[str], int]:
+def _best_pillar(text: str, topics: list[str]) -> tuple[str | None, int]:
     scores: dict[str, int] = {}
     text_lower = text.lower()
 

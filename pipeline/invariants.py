@@ -4,8 +4,6 @@ Each invariant returns a HealthCheck with pass/fail status and a human-readable
 message. The daily run calls these and reports failures without halting.
 """
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -17,7 +15,7 @@ class HealthCheck(BaseModel):
     name: str
     passed: bool
     message: str
-    value: Optional[str] = None
+    value: str | None = None
 
 
 _INVARIANTS: list[dict] = [

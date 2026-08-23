@@ -5,7 +5,7 @@ repo = Path(__file__).resolve().parent.parent
 if str(repo) not in sys.path:
     sys.path.insert(0, str(repo))
 
-from pipeline.scoring import score_item, is_worthy
+from pipeline.scoring import is_worthy, score_item
 from pipeline.storage import Item
 
 

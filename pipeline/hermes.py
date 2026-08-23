@@ -11,6 +11,7 @@ import feedparser
 import requests
 from bs4 import BeautifulSoup
 
+from config.calendar import day_plan
 from config.settings import (
     DATA_DIR,
     LINKEDIN_CLIENT_ID,
@@ -23,12 +24,14 @@ from config.settings import (
     ensure_dirs,
 )
 from pipeline.approval import approve_draft, list_pending, list_ready_to_publish, mark_published
+from pipeline.calendar import select_for_today
 from pipeline.checkpoints import write_daily_checkpoint
 from pipeline.collectors.instagram import collect_instagram
 from pipeline.collectors.reddit import collect_reddit
 from pipeline.collectors.youtube import collect_youtube
 from pipeline.dedupe import find_duplicate
 from pipeline.drafting import Draft, compile_newsletter, draft_item, load_drafts, save_draft
+from pipeline.drafting_v2 import draft_item_v2
 from pipeline.invariants import run_health_checks
 from pipeline.log import setup_logging
 from pipeline.publishers.composio import (
@@ -526,6 +529,50 @@ def cmd_draft(args) -> int:
     return 0
 
 
+
+
+def cmd_draft_today(args) -> int:
+    """Draft today's post using the LLM humanizer and the 7-day calendar."""
+    init_db()
+    ensure_dirs()
+    from datetime import date as _date
+    date_override = getattr(args, "date", None)
+    target_date = _date.fromisoformat(date_override) if date_override else None
+    plan = day_plan(target_date)
+    dry_run = getattr(args, "dry_run", False)
+
+    candidates = list_items(status="worthy", limit=args.limit * 5)
+    if not candidates:
+        # Fall back to recently collected raw items so the demo can still work.
+        candidates = list_items(status=None, limit=args.limit * 5)
+    if not candidates:
+        print("No items to draft. Run `collect` and `score` first.")
+        return 1
+
+    selected = select_for_today(candidates, limit=args.limit, for_date=target_date)
+    if not selected:
+        print(f"No item matched today's plan ({plan.post_type}: {plan.job}).")
+        return 1
+
+    queued = 0
+    for item, score in selected:
+        draft = draft_item_v2(item, score, day_plan=plan)
+        if dry_run:
+            print(f"\n--- DRY-RUN DRAFT ({plan.day_name}, {plan.post_type}) ---")
+            print(f"Title: {draft.title}")
+            print(f"Source: {draft.source_url}")
+            print(f"Hashtags: {' '.join(draft.hashtags)}")
+            print("\nLinkedIn post:")
+            print(draft.linkedin_post)
+            print("--- END DRY-RUN ---")
+        else:
+            path = save_draft(draft, QUEUE_DIR)
+            update_status(item.item_url, "drafted")
+            print(f"Draft queued: {path.name}")
+        queued += 1
+    print(f"\n{queued} draft(s) produced for {plan.day_name} ({plan.post_type}).")
+    return 0
+
 def cmd_queue(args) -> int:
     pending = list_pending()
     ready = list_ready_to_publish()
@@ -748,6 +795,12 @@ def main(argv: list[str] | None = None) -> int:
 
     p_logout = sub.add_parser("linkedin-logout", help="Clear stored LinkedIn tokens")
     p_logout.set_defaults(func=cmd_linkedin_logout)
+
+    p_draft_today = sub.add_parser("draft-today", help="Draft today's post using the 7-day calendar + LLM humanizer")
+    p_draft_today.add_argument("--limit", type=int, default=1, help="Number of draft candidates to produce")
+    p_draft_today.add_argument("--dry-run", action="store_true", help="Print draft without saving")
+    p_draft_today.add_argument("--date", default=None, help="Override date (YYYY-MM-DD) for testing")
+    p_draft_today.set_defaults(func=cmd_draft_today)
 
     args = parser.parse_args(argv)
     if not args.command:

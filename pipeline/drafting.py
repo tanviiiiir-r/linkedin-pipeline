@@ -8,13 +8,12 @@ import html
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel
 
 from pipeline.scoring import ScoreResult
 from pipeline.storage import Item
-from pipeline.topics import extract_topics, hashtags_from_topics
+from pipeline.topics import hashtags_from_topics
 
 
 class Draft(BaseModel):
@@ -211,14 +210,14 @@ def load_drafts(queue_dir: Path) -> list[Draft]:
     return drafts
 
 
-def _split_frontmatter(text: str) -> tuple[Optional[str], Optional[str]]:
+def _split_frontmatter(text: str) -> tuple[str | None, str | None]:
     m = re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", text, re.DOTALL)
     if not m:
         return None, None
     return m.group(1).strip(), m.group(2).strip()
 
 
-def _parse_draft_markdown(text: str) -> Optional[Draft]:
+def _parse_draft_markdown(text: str) -> Draft | None:
     frontmatter, body = _split_frontmatter(text)
     if not frontmatter:
         return None

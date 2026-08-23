@@ -1,32 +1,38 @@
 # CURRENT — linkedin-pipeline
 
 **Last updated:** 2026-08-23
-**Active milestone:** M1 — DONE; ready for M2
-**Status:** L4 APPROVE received; M2 (MCP server auth + VPS deployment artifacts) is next.
+**Active milestone:** M2.5 — 7-day content calendar + LLM humanizer + Founder Signal
+**Status:** ✅ DONE — L1 build complete; awaiting L4 verification.
 
 ## What was done
 
-- Copied `.genesis/` spine into repo root.
-- Ran `graphify update .` → 369 nodes, 864 edges, 17 communities.
-- Filled `PROJECT-BRIEF.md`, `DONE.html`, `PLAN.md`, `CURRENT.md`.
-- Wrote `.genesis/checkpoints/M1-REVIEW.md` with severity-classified findings.
-- Ran internal L4 verification; corrected review to add W7 (LLM schema validation).
-- L4 returned **APPROVE**.
-- Appended live row to `implementation-notes.html`; updated `PLAN.md` progress.
+- Rebased to `origin/main` (`8183f83`) which already merged M2 auth/logging fixes.
+- Created `pipeline/voice.py` with persona, tone, no-go words, signature phrases, per-day word budgets, and CTAs.
+- Created `pipeline/drafting_v2.py` LLM humanizer with JSON parsing, schema validation via Pydantic `Draft`, rule-based fallback, and Founder Signal question enforcement.
+- Created `pipeline/calendar.py` to select best item(s) for the current day type from scored/worthy items.
+- Updated `pipeline/hermes.py` with `draft-today` CLI subcommand (supports `--dry-run`, `--date`).
+- Updated `mcp_server.py` with `draft_today` MCP tool and fixed tool registration order.
+- Added `tests/test_calendar.py` and `tests/test_drafting_v2.py`; fixed `tests/test_storage.py` isolation bug.
+- Full test suite green: 29 passed. Demo commands verified.
+
+## Verification artifacts
+
+- `.genesis/checkpoints/M2.5-REVIEW.md` — severity-classified review with 0 Critical, 3 Warning, 4 Info findings.
+- Tests: `python -m pytest tests/` → 29 passed.
+- Demo: `python run.py draft-today --dry-run` → Sunday synthesis post.
+- Demo: `python run.py draft-today --dry-run --date 2026-08-29` → Founder Signal post ending with discussion question.
 
 ## What is next
 
-1. Load skills for M2: security-engineering, devops.
-2. Implement MCP server bearer-token auth (Critical C2).
-3. Fix C1 (`youtube_to_draft` registration) and W6 (ruff/dead imports) as part of auth work.
-4. Produce deployment artifacts: systemd service, Traefik route or network ACL, env docs.
-5. Run M2 demo command and L4 verify.
+1. Run L4 VERIFY for M2.5 using a separate model/context.
+2. On APPROVE, append live row to `.genesis/implementation-notes.html` and update `PLAN.md` / `DONE.html` progress.
+3. Begin M3 — VPS deploy + Hermes integration + live dry-run publish.
 
 ## Blockers
 
-- _(none)_
+- None.
 
 ## Notes
 
-- M1 demo command: `cat .genesis/checkpoints/M1-REVIEW.md | grep -c "^### "` returned 3.
-- M1 verified by internal L4 pass; separate model/context tool was not available in this runtime, so verification was performed with source-evidence cross-checking and documented in `M1-VERIFY.md`.
+- 3 pre-existing ruff warnings remain (not introduced by M2.5): `pipeline/dedupe.py` set comprehension, `pipeline/dedupe.py` SIM103, `pipeline/verify.py` FLY002.
+- Remaining M2.5 actions captured as warnings in M2.5-REVIEW.md: raw-item fallback gate, LLM fallback metric, optional LLM rerank for Saturday.

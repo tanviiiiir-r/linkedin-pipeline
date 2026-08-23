@@ -65,12 +65,13 @@
     <table>
       <thead><tr><th>#</th><th>Milestone</th><th>Phase</th><th>Demo command (proves it works)</th><th>Loops</th><th>Status</th></tr></thead>
       <tbody>
-        <tr><td>M1</td><td>Baseline code review of existing codebase</td><td>review</td><td><code>cat .genesis/checkpoints/M1-REVIEW.md | grep -c "^### "</code></td><td>L1, L4</td><td><span class="pill wip">wip</span></td></tr>
+        <tr><td>M1</td><td>Baseline code review of existing codebase</td><td>review</td><td><code>cat .genesis/checkpoints/M1-REVIEW.md | grep -c "^### "</code></td><td>L1, L4</td><td><span class="pill ok">done</span></td></tr>
         <tr><td>M2</td><td>MCP server auth + VPS deployment artifacts</td><td>build</td><td><code>curl -H "Authorization: Bearer $MCP_AUTH_TOKEN" http://$VIP:8000/sse</code></td><td>L1, L3, L4</td><td><span class="pill">todo</span></td></tr>
+        <tr><td>M2.5</td><td>7-day content calendar + LLM humanizer + Founder Signal</td><td>build</td><td><code>python run.py draft-today --dry-run</code></td><td>L1, L3, L4</td><td><span class="pill wip">wip</span></td></tr>
         <tr><td>M3</td><td>VPS deploy + Hermes integration + live dry-run publish</td><td>ship</td><td><code>docker exec hermes-agent-xqcr-hermes-agent-1 curl -s http://172.18.0.1:8000/sse</code></td><td>L1, L2, L4</td><td><span class="pill">todo</span></td></tr>
       </tbody>
     </table>
-    <p class="note">Total token budget = 3 × 25000. Update <span class="pill wip">wip</span> /
+    <p class="note">Total token budget = 4 × 25000. Update <span class="pill wip">wip</span> /
        <span class="pill ok">done</span> as loops complete. This table is mirrored in <code>PLAN.md</code> for the agent to parse.</p>
   </div>
 
@@ -81,17 +82,34 @@
       <tbody>
         <tr><td>M1</td><td>GSD suite, modular-architecture, production-readiness</td><td>tdd, security-engineering</td></tr>
         <tr><td>M2</td><td>GSD suite, modular-architecture, production-readiness</td><td>security-engineering, devops</td></tr>
+        <tr><td>M2.5</td><td>GSD suite, modular-architecture, production-readiness</td><td>tdd, llmops, prompt-engineering</td></tr>
         <tr><td>M3</td><td>GSD suite, modular-architecture, production-readiness</td><td>security-engineering, devops, vercel-deploy</td></tr>
       </tbody>
     </table>
   </div>
 
-  <h2>5 · Context & Constraints</h2>
+  <h2>5 · 7-Day Content Calendar (locked)</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>Day</th><th>Post type</th><th>Job</th></tr></thead>
+      <tbody>
+        <tr><td>Mon</td><td>Tool Drop</td><td>New tool/API/repo with one-line builder use case</td></tr>
+        <tr><td>Tue</td><td>Viral Explained</td><td>Translate a trending demo/launch/paper for builders</td></tr>
+        <tr><td>Wed</td><td>Pattern Spotting</td><td>Connect 2–3 signals into an emerging workflow</td></tr>
+        <tr><td>Thu</td><td>Builder Memo</td><td>Practical trick: cost, latency, prompt, deployment</td></tr>
+        <tr><td>Fri</td><td>Security Signal</td><td>AI security, red-team, vulnerability, safety eval</td></tr>
+        <tr><td>Sat</td><td>Founder Signal</td><td>Signal that attracts founders: GTM, moat, pricing, wedge, market timing</td></tr>
+        <tr><td>Sun</td><td>Tomorrow in AI</td><td>Prediction, question, or weekly synthesis</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>6 · Context & Constraints</h2>
   <div class="card">
     <p><b>VPS:</b> Hostinger 186.241.23.161; Hermes Agent v0.20.4 in Docker; Ollama on host at 127.0.0.1:11434.</p>
     <p><b>LinkedIn:</b> free API v2 direct OAuth (Share on LinkedIn + Sign In with LinkedIn using OpenID Connect).</p>
     <p><b>Storage:</b> SQLite + markdown locally; optional Supabase PostgreSQL.</p>
-    <p><b>Frozen for M1:</b> All source files may be read but not edited. Only <code>.genesis/</code> artifacts may be written.</p>
+    <p><b>LLM default:</b> local Ollama via OpenAI-compatible endpoint; optional OpenAI/Anthropic.</p>
   </div>
 
 </div>

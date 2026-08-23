@@ -39,7 +39,7 @@ def _keyword_set(text: str) -> set[str]:
         "they", "them", "their", "our", "new", "more", "about", "into",
         "after", "before", "during", "over", "under", "again", "further",
     }
-    return set(w for w in words if w not in stop)
+    return {w for w in words if w not in stop}
 
 
 def jaccard_similarity(a: str, b: str) -> float:
@@ -98,9 +98,7 @@ def is_duplicate(item_a: Item, item_b: Item, title_threshold: float = 0.85, cont
     body_sim = content_similarity(item_a, item_b)
     if title_sim >= title_threshold and body_sim >= content_threshold:
         return True
-    if body_sim >= 0.85:
-        return True
-    return False
+    return body_sim >= 0.85
 
 
 def find_duplicate(item: Item, candidates: list[Item]) -> Item | None:

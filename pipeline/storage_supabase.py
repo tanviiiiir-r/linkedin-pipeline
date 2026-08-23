@@ -130,6 +130,19 @@ class SupabaseStorage:
         )
         return bool(resp.data)
 
+    def load_item(self, url: str) -> dict | None:
+        if not self.client:
+            return None
+        h = url_hash(url)
+        resp = (
+            self.client.table(self.TABLE)
+            .select("*")
+            .or_(f"item_url.eq.{url},url_hash.eq.{h}")
+            .limit(1)
+            .execute()
+        )
+        return resp.data[0] if resp.data else None
+
     def list_items(self, status: str | None = None, limit: int = 100) -> list[dict]:
         if not self.client:
             return []

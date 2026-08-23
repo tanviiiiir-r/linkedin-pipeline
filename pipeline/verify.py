@@ -83,13 +83,7 @@ def _has_specific_topics(hashtags: list[str], topics: list[str]) -> bool:
 
 def verify_draft(draft: Draft) -> VerifyResult:
     """Verify a draft against pipeline quality rules."""
-    text = "\n".join([
-        draft.linkedin_post,
-        draft.newsletter_section,
-        draft.short_pill,
-        draft.forward_pill,
-        draft.narrative_pill,
-    ])
+    text = f"{draft.linkedin_post}\n{draft.newsletter_section}\n{draft.short_pill}\n{draft.forward_pill}\n{draft.narrative_pill}"
 
     checks: dict[str, bool] = {}
     reasons: list[str] = []

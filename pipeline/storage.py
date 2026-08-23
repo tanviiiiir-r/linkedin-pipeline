@@ -204,6 +204,11 @@ def save_item(item: Item) -> Path:
 
 
 def load_item(url: str) -> Item | None:
+    sb = _supabase_storage()
+    if sb:
+        row = sb.load_item(url)
+        if row:
+            return _item_from_row(row)
     h = url_hash(url)
     conn = _connection()
     row = conn.execute(

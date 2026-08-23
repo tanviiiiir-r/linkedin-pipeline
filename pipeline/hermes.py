@@ -540,13 +540,16 @@ def cmd_draft_today(args) -> int:
     target_date = _date.fromisoformat(date_override) if date_override else None
     plan = day_plan(target_date)
     dry_run = getattr(args, "dry_run", False)
+    with_image = getattr(args, "with_image", False)
+    prefer_source_image = not getattr(args, "force_comfy", False)
+    allow_raw = getattr(args, "allow_raw", False)
 
     candidates = list_items(status="worthy", limit=args.limit * 5)
-    if not candidates:
+    if not candidates and allow_raw:
         # Fall back to recently collected raw items so the demo can still work.
         candidates = list_items(status=None, limit=args.limit * 5)
     if not candidates:
-        print("No items to draft. Run `collect` and `score` first.")
+        print("No items to draft. Run `collect` and `score` first, or use --allow-raw.")
         return 1
 
     selected = select_for_today(candidates, limit=args.limit, for_date=target_date)
@@ -556,12 +559,20 @@ def cmd_draft_today(args) -> int:
 
     queued = 0
     for item, score in selected:
-        draft = draft_item_v2(item, score, day_plan=plan)
+        draft = draft_item_v2(
+            item,
+            score,
+            day_plan=plan,
+            with_image=with_image,
+            prefer_source_image=prefer_source_image,
+        )
         if dry_run:
             print(f"\n--- DRY-RUN DRAFT ({plan.day_name}, {plan.post_type}) ---")
             print(f"Title: {draft.title}")
             print(f"Source: {draft.source_url}")
             print(f"Hashtags: {' '.join(draft.hashtags)}")
+            if draft.image_path:
+                print(f"Image: {draft.image_path}")
             print("\nLinkedIn post:")
             print(draft.linkedin_post)
             print("--- END DRY-RUN ---")
@@ -800,6 +811,9 @@ def main(argv: list[str] | None = None) -> int:
     p_draft_today.add_argument("--limit", type=int, default=1, help="Number of draft candidates to produce")
     p_draft_today.add_argument("--dry-run", action="store_true", help="Print draft without saving")
     p_draft_today.add_argument("--date", default=None, help="Override date (YYYY-MM-DD) for testing")
+    p_draft_today.add_argument("--with-image", action="store_true", help="Attach an image (OG or ComfyUI)")
+    p_draft_today.add_argument("--force-comfy", action="store_true", help="Force ComfyUI generation instead of OpenGraph")
+    p_draft_today.add_argument("--allow-raw", action="store_true", help="Allow drafting from raw items when no worthy items exist")
     p_draft_today.set_defaults(func=cmd_draft_today)
 
     args = parser.parse_args(argv)

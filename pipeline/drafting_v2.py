@@ -5,6 +5,7 @@
 - Parses JSON response.
 - Validates against Pydantic `Draft` schema.
 - Falls back to rule-based `draft_item()` on failure.
+- Optionally attaches an image via `pipeline.image_engine`.
 """
 import json
 import logging
@@ -15,6 +16,7 @@ from pydantic import ValidationError
 
 from config.calendar import DayPlan, post_type_for_date
 from pipeline.drafting import Draft, draft_item
+from pipeline.image_engine import build_image_prompt, image_for_post
 from pipeline.llm_client import LLMResponse, complete, is_available
 from pipeline.scoring import ScoreResult
 from pipeline.storage import Item
@@ -53,8 +55,6 @@ def _strip_code_fences(text: str) -> str:
 def _safe_json(text: str) -> dict:
     """Parse JSON, tolerating trailing punctuation and minor cleanup."""
     text = _strip_code_fences(text)
-    # Some models emit trailing commas or explanatory text after JSON.
-    # Try strict first, then a conservative regex fallback to extract the first {...} object.
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -106,6 +106,7 @@ def _hydrate_draft(
     score: ScoreResult,
     data: dict,
     day_plan: DayPlan,
+    image_path: str = "",
 ) -> Draft:
     """Turn parsed JSON into a Pydantic Draft, filling missing fields safely."""
     now = datetime.now(timezone.utc).isoformat()
@@ -117,8 +118,10 @@ def _hydrate_draft(
 
     post = data.get("linkedin_post", "").strip()
     if day_plan.post_type == "founder_signal" and post and not post.endswith("?"):
-            cta = voice_for(day_plan.post_type).cta_by_day.get("founder_signal", "Founders: what wedge would you build here?")
-            post = f"{post}\n\n{cta}"
+        cta = voice_for(day_plan.post_type).cta_by_day.get(
+            "founder_signal", "Founders: what wedge would you build here?"
+        )
+        post = f"{post}\n\n{cta}"
 
     return Draft(
         item_id=item.id,
@@ -134,6 +137,7 @@ def _hydrate_draft(
         forward_pill=data.get("forward_pill", "").strip(),
         narrative_pill=data.get("narrative_pill", "").strip(),
         hashtags=hashtags,
+        image_path=image_path,
     )
 
 
@@ -141,6 +145,8 @@ def draft_item_v2(
     item: Item,
     score: ScoreResult,
     day_plan: DayPlan | None = None,
+    with_image: bool = False,
+    prefer_source_image: bool = True,
 ) -> Draft:
     """Create a humanized Draft via LLM, with rule-based fallback.
 
@@ -148,17 +154,35 @@ def draft_item_v2(
         item: The collected/scored item.
         score: The score result from `score_item()`.
         day_plan: Editorial plan for the target day. Defaults to today.
+        with_image: If True, attempt to attach an image.
+        prefer_source_image: Prefer OpenGraph image over ComfyUI generation.
 
     Returns:
         A validated Draft. Falls back to the rule-based drafter if the LLM is
         unavailable, returns invalid JSON, or produces a schema violation.
     """
     day_plan = day_plan or post_type_for_date()
+
+    image_path = ""
+    if with_image:
+        try:
+            img = image_for_post(
+                item.item_url,
+                build_image_prompt(day_plan.post_type, item.item_title, item.summary or ""),
+                prefer_source_image=prefer_source_image,
+            )
+            if img:
+                image_path = str(img)
+        except Exception:
+            logger.exception("Image attachment failed for %s", item.id)
+
     voice = voice_for(day_plan.post_type)
 
     if not is_available():
         logger.info("LLM unavailable; falling back to rule-based draft for %s", item.id)
-        return draft_item(item, score)
+        draft = draft_item(item, score)
+        draft.image_path = image_path
+        return draft
 
     system = _build_system_prompt(voice, day_plan)
     prompt = _build_user_prompt(item, score, day_plan)
@@ -172,20 +196,22 @@ def draft_item_v2(
         missing = [k for k in _DRAFT_JSON_KEYS if k not in data]
         if missing:
             raise DraftV2Error(f"Missing keys in LLM output: {missing}")
-        draft = _hydrate_draft(item, score, data, day_plan)
-        # Final schema validation is implicit via Pydantic construction above.
+        draft = _hydrate_draft(item, score, data, day_plan, image_path=image_path)
         return draft
     except (json.JSONDecodeError, DraftV2Error, ValidationError, TypeError, ValueError) as e:
         logger.warning("LLM draft failed for %s: %s; falling back to rule-based", item.id, e)
-        return draft_item(item, score)
+        draft = draft_item(item, score)
+        draft.image_path = image_path
+        return draft
 
 
 def draft_for_day(
     item: Item,
     score: ScoreResult,
     for_date: datetime | None = None,
+    with_image: bool = False,
 ) -> Draft:
     """Convenience wrapper that resolves a calendar day and drafts for it."""
     target = for_date.date() if for_date else datetime.now(timezone.utc).date()
     day_plan = post_type_for_date(target)
-    return draft_item_v2(item, score, day_plan=day_plan)
+    return draft_item_v2(item, score, day_plan=day_plan, with_image=with_image)

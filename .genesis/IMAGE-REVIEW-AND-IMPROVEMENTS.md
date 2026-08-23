@@ -23,7 +23,9 @@
 | File size | ⚠️ 500 KB–1.2 MB each; OK but can be larger after PNG save |
 | Color profile / metadata | ⚠️ Needs verification |
 
-## 3. Genre-by-genre review vs. top-performing LinkedIn posts
+
+> Note: This review is based on platform creative conventions and image-generation failure modes, not on actual engagement data from the operator's account or competitors.
+## 3. Genre-by-genre review vs. LinkedIn creative conventions for each content genre
 
 ### Monday — tool_drop
 **Top-post patterns:**

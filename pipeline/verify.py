@@ -10,6 +10,7 @@ from enum import Enum
 from pydantic import BaseModel
 
 from pipeline.drafting import Draft
+from pipeline.storage import Item
 from pipeline.topics import TAXONOMY
 
 
@@ -81,6 +82,93 @@ def _has_specific_topics(hashtags: list[str], topics: list[str]) -> bool:
     return False
 
 
+
+
+def _extract_claims_from_draft(text: str) -> list[str]:
+    """Pull likely factual claims out of a draft for verification."""
+    claims = []
+    # Sentence split, keep ones with numbers, quotes, or strong assertion verbs
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        s = sentence.strip()
+        if len(s) < 20:
+            continue
+        # Skip sentences that are mostly a CTA/link line
+        if re.search(r"^Read more[: ]", s, re.IGNORECASE) or s.startswith("http"):
+            continue
+        has_number = re.search(r"(?<!://)\b\d+(?:%|x|\s+(?:percent|times|fold|months?|years?|days?))?\b", s)
+        has_assertion = re.search(r"\b(says|showed|found|reported|claims|announced|launched|released|builds|uses|built)\b", s, re.IGNORECASE)
+        has_entity = len(claims) < 3 and re.search(r"\b(Pinterest|Google|OpenAI|Anthropic|Meta|Microsoft|NVIDIA|AWS|Cloudflare|GitHub|arXiv|Reddit|YouTube)\b", s, re.IGNORECASE)
+        if has_number or has_assertion or has_entity:
+            claims.append(s)
+        if len(claims) >= 8:
+            break
+    return claims
+
+
+def _claim_source_overlap(claim: str, source_text: str) -> float:
+    """Return Jaccard-ish word overlap between a claim and source text."""
+    claim_words = set(re.findall(r"\b\w+\b", claim.lower()))
+    source_words = set(re.findall(r"\b\w+\b", source_text.lower()))
+    if not claim_words:
+        return 0.0
+    overlap = claim_words & source_words
+    return len(overlap) / len(claim_words)
+
+
+def _verify_claims(draft: Draft, item: Item) -> dict[str, bool]:
+    """Rule-based claim verification against the original source item."""
+    source_text = " ".join(
+        [
+            item.item_title or "",
+            item.summary or "",
+            " ".join(item.key_claims or []),
+            item.raw_content or "",
+        ]
+    )
+    if not source_text.strip():
+        return {"claims_verified": False, "claims_source_match": False, "no_hallucinated_numbers": False}
+
+    text = f"{draft.linkedin_post}\n{draft.newsletter_section}"
+    claims = _extract_claims_from_draft(text)
+    if not claims:
+        # No strong factual claims = nothing to verify; pass cautiously
+        return {"claims_verified": True, "claims_source_match": True, "no_hallucinated_numbers": True}
+
+    matched = 0
+    hallucinated_numbers = 0
+    for claim in claims:
+        overlap = _claim_source_overlap(claim, source_text)
+        if overlap >= 0.35:
+            matched += 1
+        # Flag numbers in draft that don't appear in source at all
+        numbers = re.findall(r"\b\d+(?:\.\d+)?%?\b", claim)
+        source_numbers = set(re.findall(r"\b\d+(?:\.\d+)?%?\b", source_text))
+        for n in numbers:
+            if n not in source_numbers and not _number_tolerated(n, source_text):
+                hallucinated_numbers += 1
+
+    total = len(claims)
+    match_ratio = matched / total
+    checks = {
+        "claims_verified": True,
+        "claims_source_match": match_ratio >= 0.6,
+        "no_hallucinated_numbers": hallucinated_numbers == 0,
+    }
+    return checks
+
+
+def _number_tolerated(number: str, source_text: str) -> bool:
+    """Allow small integers (1, 2, 3, 6 months) and years if they are reasonable."""
+    try:
+        val = int(number.rstrip("%"))
+    except ValueError:
+        return False
+    if val in {1, 2, 3, 4, 5, 6, 12, 24, 52}:
+        return True
+    # Year between 2020-2030 acceptable
+    return 2020 <= val <= 2030
+
+
 def verify_draft(draft: Draft) -> VerifyResult:
     """Verify a draft against pipeline quality rules."""
     text = f"{draft.linkedin_post}\n{draft.newsletter_section}\n{draft.short_pill}\n{draft.forward_pill}\n{draft.narrative_pill}"
@@ -146,6 +234,32 @@ def verify_draft(draft: Draft) -> VerifyResult:
     if not checks["title_substantive"]:
         score -= 10
         reasons.append("Title looks clickbait or too vague")
+
+    # 9. Claim verification (requires original item; loaded from storage)
+    try:
+        from pipeline.storage import load_item
+        item = load_item(draft.source_url)
+        if item:
+            claim_checks = _verify_claims(draft, item)
+            checks.update(claim_checks)
+            if not claim_checks["claims_source_match"]:
+                score -= 15
+                reasons.append("Draft claims have low overlap with source text")
+            if not claim_checks["no_hallucinated_numbers"]:
+                score -= 15
+                reasons.append("Draft contains numbers not found in source")
+        else:
+            checks["claims_verified"] = False
+            checks["claims_source_match"] = False
+            checks["no_hallucinated_numbers"] = False
+            score -= 10
+            reasons.append("Could not load source item for claim verification")
+    except (RuntimeError, ValueError, TypeError):
+        checks["claims_verified"] = False
+        checks["claims_source_match"] = False
+        checks["no_hallucinated_numbers"] = False
+        score -= 5
+        reasons.append("Claim verification check failed")
 
     score = max(0, min(100, score))
 

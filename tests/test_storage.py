@@ -13,6 +13,14 @@ from pipeline.storage import Item, init_db, item_exists, save_item, load_item, l
 
 def test_save_and_load():
     init_db()
+    # Remove any leftover test row so this test is isolated
+    try:
+        from pipeline.storage_supabase import SupabaseStorage
+        s = SupabaseStorage()
+        if s.is_available():
+            s.client.table(s.TABLE).delete().eq("item_url", "https://example.com/post-1").execute()
+    except Exception:
+        pass
     item = Item(
         source_name="Test Source",
         source_url="https://example.com/feed",

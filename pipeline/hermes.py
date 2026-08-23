@@ -1,10 +1,11 @@
 """Hermes orchestrator: collect -> score -> draft -> queue -> (human approves) -> publish."""
 import argparse
 import csv
+import logging
+import os
 import re
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
 import feedparser
 import requests
@@ -18,31 +19,31 @@ from config.settings import (
     MAX_RAW_CHARS,
     NEWSLETTER_DIR,
     QUEUE_DIR,
-    RAW_DIR,
-    REQUIRE_APPROVAL,
     SOURCES_CSV,
     ensure_dirs,
 )
 from pipeline.approval import approve_draft, list_pending, list_ready_to_publish, mark_published
-from pipeline.collectors.instagram import collect_instagram
-from pipeline.collectors.reddit import REDDIT_COMMUNITIES, collect_reddit
-from pipeline.collectors.youtube import YOUTUBE_CHANNELS, collect_youtube
 from pipeline.checkpoints import write_daily_checkpoint
-from pipeline.dedupe import canonical_url, find_duplicate, is_duplicate
+from pipeline.collectors.instagram import collect_instagram
+from pipeline.collectors.reddit import collect_reddit
+from pipeline.collectors.youtube import collect_youtube
+from pipeline.dedupe import find_duplicate
 from pipeline.drafting import Draft, compile_newsletter, draft_item, load_drafts, save_draft
 from pipeline.invariants import run_health_checks
+from pipeline.log import setup_logging
 from pipeline.publishers.composio import (
-    ComposioLinkedInPublisher,
-    ComposioTwitterPublisher,
     get_composio_linkedin_publisher,
     get_composio_twitter_publisher,
 )
-from pipeline.publishers.linkedin import DirectLinkedInPublisher, DryRunPublisher, get_publisher
+from pipeline.publishers.linkedin import DirectLinkedInPublisher, DryRunPublisher
 from pipeline.scoring import is_worthy, score_item
 from pipeline.storage import Item, init_db, item_exists, list_items, save_item, update_status
 from pipeline.tokens import clear_tokens, load_tokens, save_tokens
-from pipeline.topics import extract_topics, hashtags_from_topics
+from pipeline.topics import extract_topics
 from pipeline.verify import format_verdict, verify_draft
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 # Publishing targets controlled by CLI args and env
 _PUBLISH_TARGETS = {
@@ -50,9 +51,6 @@ _PUBLISH_TARGETS = {
     "twitter": get_composio_twitter_publisher,
 }
 
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-SOURCES_CSV = REPO_ROOT / "sources.csv"
 
 _session = requests.Session()
 _session.headers.update(
@@ -62,7 +60,8 @@ _session.headers.update(
 )
 _adapter = requests.adapters.HTTPAdapter(max_retries=0, pool_connections=10, pool_maxsize=10)
 _session.mount("https://", _adapter)
-_session.mount("http://", _adapter)
+if os.getenv("ALLOW_HTTP", "").lower() in ("1", "true", "yes"):
+    _session.mount("http://", _adapter)
 
 
 def now_iso() -> str:
@@ -84,7 +83,7 @@ def extract_with_jina(url: str, timeout: int = 20) -> str:
         )
         if r.status_code == 200 and "blocked" not in r.text.lower():
             return re.sub(r"\n{3,}", "\n\n", r.text.strip())[:MAX_RAW_CHARS]
-    except Exception as e:
+    except requests.RequestException as e:
         print(f"  jina error: {e}")
     return ""
 
@@ -94,7 +93,7 @@ def fetch_feed(url: str, timeout: int = 10):
         r = _session.get(url, timeout=timeout)
         r.raise_for_status()
         return feedparser.parse(r.content)
-    except Exception as e:
+    except requests.RequestException as e:
         print(f"  feed error: {e}")
         return None
 
@@ -224,8 +223,8 @@ def collect_github_trending(language: str, dry_run: bool = False, limit: int = 1
             count += 1
         print(f"  {count} new")
         return count
-    except Exception as e:
-        print(f"  error: {e}")
+    except requests.RequestException as e:
+        logger.warning("GitHub trending collection failed: %s", e)
         return 0
 
 
@@ -262,8 +261,8 @@ def collect_github_search(query: str, dry_run: bool = False, limit: int = 10) ->
             count += 1
         print(f"  {count} new")
         return count
-    except Exception as e:
-        print(f"  error: {e}")
+    except requests.RequestException as e:
+        logger.warning("GitHub search collection failed: %s", e)
         return 0
 
 
@@ -278,18 +277,30 @@ def cmd_collect(args) -> int:
             url_or_query = row["url"]
             source_type = row["type"]
             content_type = row["content_type"]
-            if source_type == "rss":
-                total += collect_rss(name, url_or_query, content_type, dry_run=args.dry_run, limit=args.limit)
-            elif source_type == "github-trending":
-                total += collect_github_trending(url_or_query, dry_run=args.dry_run, limit=args.limit)
-            elif source_type == "github-search":
-                total += collect_github_search(url_or_query, dry_run=args.dry_run, limit=args.limit)
+            try:
+                if source_type == "rss":
+                    total += collect_rss(name, url_or_query, content_type, dry_run=args.dry_run, limit=args.limit)
+                elif source_type == "github-trending":
+                    total += collect_github_trending(url_or_query, dry_run=args.dry_run, limit=args.limit)
+                elif source_type == "github-search":
+                    total += collect_github_search(url_or_query, dry_run=args.dry_run, limit=args.limit)
+            except Exception:
+                logger.exception("Source %s failed", name)
     if not args.skip_reddit:
-        total += collect_reddit(dry_run=args.dry_run, limit_per_sub=args.limit)
+        try:
+            total += collect_reddit(dry_run=args.dry_run, limit_per_sub=args.limit)
+        except Exception:
+            logger.exception("Reddit collection failed")
     if not args.skip_youtube:
-        total += collect_youtube(dry_run=args.dry_run, limit_per_channel=args.limit)
+        try:
+            total += collect_youtube(dry_run=args.dry_run, limit_per_channel=args.limit)
+        except Exception:
+            logger.exception("YouTube collection failed")
     if not args.skip_instagram:
-        total += collect_instagram(dry_run=args.dry_run, limit=args.limit)
+        try:
+            total += collect_instagram(dry_run=args.dry_run, limit=args.limit)
+        except Exception:
+            logger.exception("Instagram collection failed")
     print(f"\nCollection complete: {total} new items")
     return 0
 
@@ -342,21 +353,25 @@ def cmd_daily(args) -> int:
                 elif source_type == "github-search":
                     collect_total += collect_github_search(url_or_query, dry_run=args.dry_run, limit=args.collect_limit)
             except Exception as e:
+                logger.exception("Source %s failed during daily run", name)
                 source_errors.append(f"{name}: {e}")
     if not args.skip_reddit:
         try:
             collect_total += collect_reddit(dry_run=args.dry_run, limit_per_sub=args.collect_limit)
         except Exception as e:
+            logger.exception("Reddit collection failed during daily run")
             source_errors.append(f"reddit: {e}")
     if not args.skip_youtube:
         try:
             collect_total += collect_youtube(dry_run=args.dry_run, limit_per_channel=args.collect_limit)
         except Exception as e:
+            logger.exception("YouTube collection failed during daily run")
             source_errors.append(f"youtube: {e}")
     if not args.skip_instagram:
         try:
             collect_total += collect_instagram(dry_run=args.dry_run, limit=args.collect_limit)
         except Exception as e:
+            logger.exception("Instagram collection failed during daily run")
             source_errors.append(f"instagram: {e}")
     print(f"\nCollection complete: {collect_total} new items")
 
@@ -607,6 +622,7 @@ def cmd_linkedin_exchange(args) -> int:
     try:
         resp = DirectLinkedInPublisher.exchange_code(args.code)
     except Exception as e:
+        logger.exception("LinkedIn token exchange failed")
         print(f"Token exchange failed: {e}", file=sys.stderr)
         return 1
 
@@ -620,12 +636,12 @@ def cmd_linkedin_exchange(args) -> int:
     pub = DirectLinkedInPublisher(access_token=access_token, author_urn="")
     author_urn = pub.fetch_author_urn()
     if not author_urn:
-        print("Warning: could not fetch author URN. Publishing will retry at publish time.", file=sys.stderr)
+        print("Error: could not fetch author URN. Tokens not saved.", file=sys.stderr)
+        return 1
 
-    save_tokens(access_token, refresh_token, expires_in, author_urn or "")
+    save_tokens(access_token, refresh_token, expires_in, author_urn)
     print("LinkedIn tokens saved successfully.")
-    if author_urn:
-        print(f"Author URN: {author_urn}")
+    print(f"Author URN: {author_urn}")
     return 0
 
 

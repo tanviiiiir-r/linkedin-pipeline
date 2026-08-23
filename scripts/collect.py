@@ -8,7 +8,7 @@ Save raw items as structured markdown + SQLite for fast queries.
 import csv
 import hashlib
 import json
-import os
+import logging
 import re
 import sqlite3
 import sys
@@ -23,6 +23,8 @@ ROOT = Path("/opt/data/content-pipeline")
 RAW_DIR = ROOT / "raw"
 SOURCES_CSV = ROOT / "sources.csv"
 DB_PATH = ROOT / "content.db"
+
+logger = logging.getLogger("scripts.collect")
 
 MAX_RAW_TOKENS = 800
 TOKEN_RATIO = 0.4
@@ -83,7 +85,7 @@ def init_db():
 
 
 def url_hash(url: str) -> str:
-    return hashlib.md5(url.encode()).hexdigest()[:12]
+    return hashlib.sha256(url.encode()).hexdigest()[:12]
 
 
 def item_exists(url: str) -> bool:
@@ -103,7 +105,7 @@ def extract_with_jina(url: str, timeout=20) -> str:
         )
         if r.status_code == 200 and "You've been blocked" not in r.text:
             return re.sub(r"\n{3,}", "\n\n", r.text.strip())
-    except Exception as e:
+    except requests.RequestException as e:
         print(f"  jina error: {e}")
     return ""
 
@@ -113,7 +115,7 @@ def fetch_feed(url: str, timeout=20):
         r = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
         return feedparser.parse(r.content)
-    except Exception as e:
+    except requests.RequestException as e:
         print(f"  feed error: {e}")
         return None
 
@@ -273,8 +275,8 @@ def collect_github_trending(language: str):
                 count += 1
         print(f"  {count} new")
         return count
-    except Exception as e:
-        print(f"  error: {e}")
+    except requests.RequestException as e:
+        logger.warning("GitHub trending collection failed: %s", e)
         return 0
 
 
@@ -302,8 +304,8 @@ def collect_github_search(query: str):
                 count += 1
         print(f"  {count} new")
         return count
-    except Exception as e:
-        print(f"  error: {e}")
+    except requests.RequestException as e:
+        logger.warning("GitHub search collection failed: %s", e)
         return 0
 
 

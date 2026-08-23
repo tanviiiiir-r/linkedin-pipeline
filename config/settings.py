@@ -29,6 +29,16 @@ LINKEDIN_SCOPES = os.getenv("LINKEDIN_SCOPES", "openid profile email w_member_so
 # Token encryption (optional but recommended). Fernet needs a 32-byte base64 key.
 TOKEN_SECRET = os.getenv("TOKEN_SECRET", "")
 
+# LLM client settings (optional; rule-based drafting works without them)
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")  # ollama | openai | anthropic
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")  # e.g. http://localhost:11434/v1 for Ollama
+LLM_MODEL = os.getenv("LLM_MODEL", "llama3.2")
+LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "30"))
+
+# MCP server auth
+MCP_AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "")
+
 # Collection
 MAX_RAW_CHARS = 3000
 CLAIM_KEYWORDS = [

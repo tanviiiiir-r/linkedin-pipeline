@@ -4,12 +4,15 @@ Collects recent videos from a curated list of AI/security/infrastructure channel
 and stores them as Items.
 """
 import json
+import logging
 import os
+import shutil
 import subprocess
 from datetime import datetime, timezone
-from typing import Optional
 
 from pipeline.storage import Item, item_exists, save_item
+
+logger = logging.getLogger(__name__)
 
 YOUTUBE_CHANNELS = [
     ("Andrej Karpathy", "@AndrejKarpathy"),
@@ -18,15 +21,36 @@ YOUTUBE_CHANNELS = [
     ("Yannic Kilcher", "@YannicKilcher"),
 ]
 
+COMPOSIO_SEARCH_PATHS = [
+    "/opt/data/home/.local/bin",
+    "/opt/data/.local/bin",
+    os.path.expanduser("~/.local/bin"),
+]
+
+
+def _composio_bin() -> str:
+    """Resolve the absolute path to the composio CLI."""
+    candidate = shutil.which("composio")
+    if not candidate:
+        for d in COMPOSIO_SEARCH_PATHS:
+            candidate = shutil.which("composio", path=d)
+            if candidate:
+                break
+    if not candidate:
+        raise RuntimeError("composio CLI not found on PATH")
+    return candidate
+
 
 def _run(slug: str, payload: dict) -> dict:
     env = {**os.environ, "PATH": "/opt/data/home/.local/bin:" + os.environ.get("PATH", "")}
+    binary = _composio_bin()
     proc = subprocess.run(
-        ["composio", "execute", slug, "-d", json.dumps(payload)],
+        [binary, "execute", slug, "-d", json.dumps(payload)],
         capture_output=True,
         text=True,
         env=env,
         timeout=60,
+        check=False,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"Composio {slug} failed: {proc.stderr}")
@@ -38,7 +62,7 @@ def _run(slug: str, payload: dict) -> dict:
         raise RuntimeError(f"Composio {slug} returned invalid JSON: {e}")
 
 
-def _get_channel_id(handle: str) -> Optional[str]:
+def _get_channel_id(handle: str) -> str | None:
     data = _run("YOUTUBE_GET_CHANNEL_ID_BY_HANDLE", {"channel_handle": handle})
     items = data.get("data", {}).get("items", [])
     if items:
@@ -52,7 +76,8 @@ def _parse_iso8601(ts: str) -> str:
     try:
         dt = datetime.fromisoformat(ts)
         return dt.isoformat()
-    except Exception:
+    except (ValueError, OSError):
+        logger.warning("Could not parse YouTube timestamp: %s", ts)
         return datetime.now(timezone.utc).isoformat()
 
 
@@ -104,7 +129,7 @@ def _normalize_channel(channel_name: str, handle: str, limit: int = 3) -> list[I
 def collect_youtube(
     dry_run: bool = False,
     limit_per_channel: int = 3,
-    channels: Optional[list[tuple[str, str]]] = None,
+    channels: list[tuple[str, str]] | None = None,
 ) -> int:
     channels = channels or YOUTUBE_CHANNELS
     total = 0

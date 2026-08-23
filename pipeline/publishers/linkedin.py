@@ -1,5 +1,5 @@
 """LinkedIn publishing adapters: direct OAuth v2 (free personal API) + safe dry-run."""
-from typing import Optional
+import logging
 
 import requests
 
@@ -12,6 +12,8 @@ from config.settings import (
 )
 from pipeline.drafting import Draft
 from pipeline.tokens import load_tokens, save_tokens
+
+logger = logging.getLogger(__name__)
 
 
 class LinkedInPublisher:
@@ -52,9 +54,9 @@ class DirectLinkedInPublisher(LinkedInPublisher):
 
     def __init__(
         self,
-        access_token: Optional[str] = None,
-        refresh_token: Optional[str] = None,
-        author_urn: Optional[str] = None,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
+        author_urn: str | None = None,
     ):
         self.access_token = access_token
         self.refresh_token = refresh_token
@@ -111,7 +113,7 @@ class DirectLinkedInPublisher(LinkedInPublisher):
         r.raise_for_status()
         return r.json()
 
-    def fetch_author_urn(self) -> Optional[str]:
+    def fetch_author_urn(self) -> str | None:
         """Fetch the authenticated member's person URN using the userinfo endpoint."""
         if not self.access_token:
             return None
@@ -128,8 +130,9 @@ class DirectLinkedInPublisher(LinkedInPublisher):
             member_id = data.get("sub")
             if member_id:
                 return f"urn:li:person:{member_id}"
-        except Exception:
-            pass
+            logger.warning("LinkedIn userinfo did not return a member id (sub)")
+        except requests.RequestException:
+            logger.exception("Failed to fetch LinkedIn author URN")
         return None
 
     def ensure_fresh_token(self) -> bool:
@@ -150,6 +153,7 @@ class DirectLinkedInPublisher(LinkedInPublisher):
             )
             return True
         except Exception:
+            logger.exception("Failed to refresh LinkedIn access token")
             return False
 
     def publish(self, draft: Draft) -> dict:
@@ -195,6 +199,7 @@ class DirectLinkedInPublisher(LinkedInPublisher):
             r.raise_for_status()
             return {"ok": True, "platform": "linkedin", "response": r.json()}
         except requests.RequestException as e:
+            logger.exception("LinkedIn publish failed")
             return {
                 "ok": False,
                 "error": str(e),

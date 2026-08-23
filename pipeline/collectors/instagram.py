@@ -7,12 +7,21 @@ own feed as a trend signal. It can be extended to lookup other accounts if the
 connected account has the necessary permissions.
 """
 import json
+import logging
 import os
+import shutil
 import subprocess
 from datetime import datetime, timezone
-from typing import Optional
 
 from pipeline.storage import Item, item_exists, save_item
+
+logger = logging.getLogger(__name__)
+
+COMPOSIO_SEARCH_PATHS = [
+    "/opt/data/home/.local/bin",
+    "/opt/data/.local/bin",
+    os.path.expanduser("~/.local/bin"),
+]
 
 INSTAGRAM_ACCOUNTS = [
     # These are handles for reference; the Composio Instagram API operates on
@@ -22,14 +31,29 @@ INSTAGRAM_ACCOUNTS = [
 ]
 
 
+def _composio_bin() -> str:
+    """Resolve the absolute path to the composio CLI, raising if unavailable."""
+    candidate = shutil.which("composio")
+    if not candidate:
+        for d in COMPOSIO_SEARCH_PATHS:
+            candidate = shutil.which("composio", path=d)
+            if candidate:
+                break
+    if not candidate:
+        raise RuntimeError("composio CLI not found on PATH")
+    return candidate
+
+
 def _run(slug: str, payload: dict) -> dict:
     env = {**os.environ, "PATH": "/opt/data/home/.local/bin:" + os.environ.get("PATH", "")}
+    binary = _composio_bin()
     proc = subprocess.run(
-        ["composio", "execute", slug, "-d", json.dumps(payload)],
+        [binary, "execute", slug, "-d", json.dumps(payload)],
         capture_output=True,
         text=True,
         env=env,
         timeout=60,
+        check=False,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"Composio {slug} failed: {proc.stderr}")
@@ -41,7 +65,7 @@ def _run(slug: str, payload: dict) -> dict:
         raise RuntimeError(f"Composio {slug} returned invalid JSON: {e}")
 
 
-def _get_user_id() -> Optional[str]:
+def _get_user_id() -> str | None:
     data = _run("INSTAGRAM_GET_USER_INFO", {})
     return data.get("data", {}).get("id")
 
@@ -52,19 +76,17 @@ def _parse_iso8601(ts: str) -> str:
     try:
         dt = datetime.fromisoformat(ts)
         return dt.isoformat()
-    except Exception:
+    except (ValueError, TypeError):
         return datetime.now(timezone.utc).isoformat()
 
 
 def _normalize_media(
-    account_name: str, media: dict, since: Optional[int] = None
-) -> Optional[Item]:
-    media_id = media.get("id", "")
+    account_name: str, media: dict, since: int | None = None
+) -> Item | None:
     caption = media.get("caption", "") or ""
     permalink = media.get("permalink", "")
     timestamp = media.get("timestamp", "")
     media_type = media.get("media_type", "")
-    thumbnail_url = media.get("thumbnail_url") or media.get("media_url", "")
 
     if not permalink or item_exists(permalink):
         return None
@@ -73,8 +95,8 @@ def _normalize_media(
             ts_dt = datetime.fromisoformat(timestamp.replace("+0000", "+00:00"))
             if int(ts_dt.timestamp()) < since:
                 return None
-        except Exception:
-            pass
+        except (ValueError, OSError):
+            logger.warning("Could not parse Instagram timestamp: %s", timestamp)
 
     return Item(
         source_name=f"Instagram {account_name}",
@@ -93,7 +115,7 @@ def _normalize_media(
 def collect_instagram(
     dry_run: bool = False,
     limit: int = 10,
-    since: Optional[int] = None,
+    since: int | None = None,
 ) -> int:
     print("[Instagram] fetching connected account media")
     user_id = _get_user_id()

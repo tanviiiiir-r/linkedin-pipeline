@@ -1,6 +1,7 @@
 """SQLite + markdown persistence for collected items."""
 import hashlib
 import json
+import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,11 +11,15 @@ from pydantic import BaseModel, Field
 
 from config.settings import DB_PATH, RAW_DIR, ensure_dirs
 
+logger = logging.getLogger(__name__)
+
 # Optional Supabase PostgreSQL backend
 try:
-    from pipeline.storage_supabase import SupabaseStorage, get_storage as _get_supabase_storage
-except Exception as _supabase_err:
+    from pipeline.storage_supabase import SupabaseStorage
+    from pipeline.storage_supabase import get_storage as _get_supabase_storage
+except ImportError:
     _get_supabase_storage = lambda: None
+    logger.debug("Supabase backend not available")
 
 
 class Item(BaseModel):
@@ -42,7 +47,7 @@ class Item(BaseModel):
 
     model_config = {"extra": "ignore"}
 
-    def model_post_init(self, __context):
+    def model_post_init(self, __context, /):
         if not self.url_hash:
             self.url_hash = url_hash(self.item_url)
         if not self.id:
@@ -50,7 +55,10 @@ class Item(BaseModel):
 
 
 def url_hash(url: str) -> str:
-    return hashlib.md5(url.encode()).hexdigest()[:12]
+    return hashlib.sha256(url.encode()).hexdigest()[:12]
+
+
+_ALLOWED_INDEX_COLUMNS = {"collected_at", "status", "source_name"}
 
 
 def _connection() -> sqlite3.Connection:
@@ -86,7 +94,7 @@ def init_db() -> None:
         )
         """
     )
-    for idx in ("collected_at", "status", "source_name"):
+    for idx in _ALLOWED_INDEX_COLUMNS:
         conn.execute(f"CREATE INDEX IF NOT EXISTS idx_items_{idx} ON items({idx})")
     conn.commit()
     conn.close()
@@ -98,7 +106,7 @@ def _supabase_storage() -> Optional["SupabaseStorage"]:
         if s and s.is_available():
             return s
     except Exception:
-        pass
+        logger.exception("Supabase backend unavailable")
     return None
 
 
@@ -116,6 +124,11 @@ def item_exists(url: str) -> bool:
 
 def save_item(item: Item) -> Path:
     """Persist item to Supabase (if configured) and local markdown/SQLite."""
+    if item_exists(item.item_url):
+        logger.debug("Skipping save for existing item: %s", item.item_url)
+        # Mirror would have been written at original save time; return a stable path.
+        today = item.collected_at[:10] if item.collected_at else datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return RAW_DIR / today / _slugify(item.source_name) / f"{item.id}--{_slugify(item.item_title)}.md"
     sb = _supabase_storage()
     if sb:
         return sb.save_item(item)
@@ -152,7 +165,7 @@ def save_item(item: Item) -> Path:
 ---
 
 ## Claims
-{"\n".join(f"- {c}" for c in item.key_claims) or "- [No claims extracted]"}
+{chr(10).join(f"- {c}" for c in item.key_claims) or "- [No claims extracted]"}
 
 ## Links
 - Primary source: {item.item_url}
@@ -190,7 +203,7 @@ def save_item(item: Item) -> Path:
     return path
 
 
-def load_item(url: str) -> Optional[Item]:
+def load_item(url: str) -> Item | None:
     h = url_hash(url)
     conn = _connection()
     row = conn.execute(
@@ -202,11 +215,11 @@ def load_item(url: str) -> Optional[Item]:
     return _item_from_row(row)
 
 
-def list_items(status: Optional[str] = None, limit: int = 100) -> list[Item]:
+def list_items(status: str | None = None, limit: int = 100) -> list[Item]:
     sb = _supabase_storage()
     if sb:
         rows = sb.list_items(status=status, limit=limit)
-        return [_item_from_row({k: row.get(k) for k in row.keys()}) for row in rows]
+        return [_item_from_row({k: row.get(k) for k in row}) for row in rows]
     conn = _connection()
     if status:
         rows = conn.execute(
@@ -244,7 +257,8 @@ def _slugify(text: str, max_len: int = 60) -> str:
 
 def _item_from_row(row) -> Item:
     data: dict = {}
-    for key in row.keys():
+    keys = row.keys() if hasattr(row, "keys") else list(range(len(row)))
+    for key in keys:
         value = row[key]
         if value is None:
             data[key] = [] if key in ("key_claims", "pillar_candidates", "topics") else "" if key in ("reddit_permalink",) else 0 if key in ("reddit_score", "reddit_comments") else value

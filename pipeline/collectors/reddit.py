@@ -5,21 +5,19 @@ as Items in the shared storage backend (Supabase/SQLite).
 """
 import hashlib
 import json
+import logging
 import shutil
 import subprocess
 from datetime import datetime, timezone
-from typing import Optional
 
-from pydantic import BaseModel
-
-from config.settings import RAW_DIR, ensure_dirs
 from pipeline.storage import Item, item_exists, save_item
 
+logger = logging.getLogger(__name__)
 
-COMPOSIO_BIN: Optional[str] = None
+COMPOSIO_BIN: str | None = None
 
 
-def _composio_bin() -> Optional[str]:
+def _composio_bin() -> str | None:
     global COMPOSIO_BIN
     if COMPOSIO_BIN is not None:
         return COMPOSIO_BIN
@@ -35,7 +33,7 @@ def _execute(slug: str, payload: dict) -> dict:
     if not binary:
         raise RuntimeError("composio CLI not found on PATH")
     cmd = [binary, "execute", slug, "-d", json.dumps(payload)]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
     try:
         data = json.loads(result.stdout) if result.stdout.strip() else {}
     except json.JSONDecodeError:
@@ -100,7 +98,7 @@ def _post_to_item(post: dict, source_name: str) -> Item:
         raw = raw[:4000] + "\n\n[truncated]"
 
     return Item(
-        id=hashlib.md5(item_url.encode()).hexdigest()[:12],
+        id=hashlib.sha256(item_url.encode()).hexdigest()[:12],
         source_name=f"Reddit r/{subreddit}",
         source_url=f"https://www.reddit.com/r/{subreddit}/",
         item_url=item_url,
@@ -138,14 +136,14 @@ def fetch_subreddit(subreddit: str, sort: str = "top", time_filter: str = "week"
     return []
 
 
-def collect_reddit(dry_run: bool = False, limit_per_sub: Optional[int] = None) -> int:
+def collect_reddit(dry_run: bool = False, limit_per_sub: int | None = None) -> int:
     """Collect top posts from configured subreddits."""
     if not _composio_bin():
         print("[reddit] composio CLI not available; skipping Reddit collection")
         return 0
 
     total = 0
-    for tier, subs in REDDIT_COMMUNITIES.items():
+    for subs in REDDIT_COMMUNITIES.values():
         for sub, default_limit in subs.items():
             max_results = limit_per_sub or default_limit
             print(f"\n[Reddit r/{sub}] sort=top time=week limit={max_results}")

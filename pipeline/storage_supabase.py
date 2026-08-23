@@ -5,19 +5,20 @@ SUPABASE_URL/SERVICE_ROLE_KEY are not configured.
 """
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel
 
 from config.settings import (
-    DATA_DIR,
     RAW_DIR,
     SUPABASE_SERVICE_ROLE_KEY,
     SUPABASE_URL,
     ensure_dirs,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _supabase_client():
@@ -27,13 +28,13 @@ def _supabase_client():
         from supabase import create_client
 
         return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-    except Exception as e:
-        print(f"Supabase init error: {e}")
+    except (ImportError, ConnectionError) as e:
+        logger.warning("Supabase init error: %s", e)
         return None
 
 
 def url_hash(url: str) -> str:
-    return hashlib.md5(url.encode()).hexdigest()[:12]
+    return hashlib.sha256(url.encode()).hexdigest()[:12]
 
 
 def _now() -> str:
@@ -60,8 +61,8 @@ class SupabaseStorage:
         # created via migration/SQL editor ahead of time, or rely on first upsert.
         try:
             self.client.table(self.TABLE).select("id").limit(1).execute()
-        except Exception:
-            pass
+        except ConnectionError:
+            logger.debug("Supabase table check failed; assuming table exists or will be created")
 
     @staticmethod
     def _item_to_row(item: BaseModel) -> dict:
@@ -102,7 +103,7 @@ class SupabaseStorage:
         if not self.client:
             raise RuntimeError("Supabase client not available")
         row = self._item_to_row(item)
-        self.client.table(self.TABLE).upsert(row, ignore_duplicates=False).execute()
+        self.client.table(self.TABLE).upsert(row, ignore_duplicates=True).execute()
 
         # Also save a markdown mirror in data/raw for portability
         ensure_dirs()
@@ -129,7 +130,7 @@ class SupabaseStorage:
         )
         return bool(resp.data)
 
-    def list_items(self, status: Optional[str] = None, limit: int = 100) -> list[dict]:
+    def list_items(self, status: str | None = None, limit: int = 100) -> list[dict]:
         if not self.client:
             return []
         q = self.client.table(self.TABLE).select("*").order("collected_at", desc=True)
@@ -157,12 +158,14 @@ def _slugify(text: str, max_len: int = 60) -> str:
 
 def _markdown_mirror(item: BaseModel) -> str:
     data = item.model_dump() if hasattr(item, "model_dump") else item.dict()
+    claims = data.get("key_claims", [])
+    claims_md = "\n".join(f"- {c}" for c in claims) if claims else "- [No claims extracted]"
     return f"""---
 {json.dumps(data, indent=2, default=str)}
 ---
 
 ## Claims
-{"\n".join(f"- {c}" for c in data.get("key_claims", [])) or "- [No claims extracted]"}
+{claims_md}
 
 ## Links
 - Primary source: {data.get("item_url", "")}

@@ -8,18 +8,20 @@ These call the Composio CLI to execute connected-app actions. They require:
 No API keys for the platforms themselves are stored; Composio holds the OAuth.
 """
 import json
+import logging
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 from config.settings import REQUIRE_APPROVAL
 from pipeline.drafting import Draft
 from pipeline.publishers.linkedin import LinkedInPublisher
 
+logger = logging.getLogger(__name__)
 
-def _composio_bin() -> Optional[str]:
-    """Return the path to the composio CLI, or None if unavailable."""
+
+def _composio_bin() -> str | None:
+    """Return the absolute path to the composio CLI, or None if unavailable."""
     candidate = shutil.which("composio")
     if candidate:
         return candidate
@@ -48,9 +50,13 @@ def _run(slug: str, payload: dict, dry_run: bool = False, account: str = "") -> 
             capture_output=True,
             text=True,
             timeout=60,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "composio execute timed out"}
+    except OSError as e:
+        logger.exception("Failed to execute composio command")
+        return {"ok": False, "error": f"composio execute failed: {e}"}
 
     # Composio returns {"successful": bool, ...} or an error object
     try:
@@ -69,15 +75,15 @@ def _run(slug: str, payload: dict, dry_run: bool = False, account: str = "") -> 
 class ComposioLinkedInPublisher(LinkedInPublisher):
     """Publish approved drafts to LinkedIn via Composio's connected account."""
 
-    def __init__(self, author_urn: Optional[str] = None, account: str = ""):
+    def __init__(self, author_urn: str | None = None, account: str = ""):
         self.author_urn = author_urn
         self.account = account
-        self._resolved_author: Optional[str] = None
+        self._resolved_author: str | None = None
 
     def is_configured(self) -> bool:
         return _composio_bin() is not None
 
-    def _resolve_author(self) -> Optional[str]:
+    def _resolve_author(self) -> str | None:
         if self._resolved_author:
             return self._resolved_author
         if self.author_urn:
@@ -87,6 +93,7 @@ class ComposioLinkedInPublisher(LinkedInPublisher):
         # Fetch the authenticated member's person URN via Composio
         resp = _run("LINKEDIN_GET_MY_INFO", {}, account=self.account)
         if not resp.get("ok"):
+            logger.warning("Composio LinkedIn author resolution failed: %s", resp.get("error"))
             return None
 
         # Composio returns the LinkedIn response nested; find the person URN
@@ -146,13 +153,13 @@ class ComposioTwitterPublisher(LinkedInPublisher):
         return _run("TWITTER_CREATION_OF_A_POST", payload, account=self.account)
 
 
-def get_composio_linkedin_publisher() -> Optional[ComposioLinkedInPublisher]:
+def get_composio_linkedin_publisher() -> ComposioLinkedInPublisher | None:
     if not _composio_bin():
         return None
     return ComposioLinkedInPublisher()
 
 
-def get_composio_twitter_publisher() -> Optional[ComposioTwitterPublisher]:
+def get_composio_twitter_publisher() -> ComposioTwitterPublisher | None:
     if not _composio_bin():
         return None
     return ComposioTwitterPublisher()

@@ -1,16 +1,18 @@
 """Encrypted token persistence for LinkedIn OAuth tokens."""
 import json
+import logging
 import os
 import sqlite3
 from base64 import urlsafe_b64encode
-from pathlib import Path
-from typing import Optional
+from datetime import datetime, timezone
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from config.settings import DB_PATH, TOKEN_SECRET, ensure_dirs
+
+logger = logging.getLogger(__name__)
 
 SALT = b"hermes-linkedin-pipeline-v1"
 SERVICE = "linkedin"
@@ -67,8 +69,6 @@ def save_tokens(access_token: str, refresh_token: str = "", expires_in: int = 0,
         }
     )
     encrypted = _fernet().encrypt(blob.encode()).decode()
-    from datetime import datetime, timezone
-
     conn = _connection()
     conn.execute(
         """
@@ -85,11 +85,11 @@ def save_tokens(access_token: str, refresh_token: str = "", expires_in: int = 0,
     # Restrict file permissions when possible
     try:
         os.chmod(DB_PATH, 0o600)
-    except Exception:
-        pass
+    except OSError:
+        logger.warning("Could not chmod token database to 0o600", exc_info=True)
 
 
-def load_tokens() -> Optional[dict]:
+def load_tokens() -> dict | None:
     """Load and decrypt LinkedIn tokens, if they exist."""
     init_tokens_table()
     conn = _connection()
@@ -105,7 +105,8 @@ def load_tokens() -> Optional[dict]:
         decrypted = _fernet().decrypt(row["encrypted_blob"].encode()).decode()
         return json.loads(decrypted)
     except Exception as e:
-        raise RuntimeError(f"Failed to decrypt LinkedIn tokens: {e}")
+        logger.exception("Failed to decrypt LinkedIn tokens")
+        raise RuntimeError(f"Failed to decrypt LinkedIn tokens: {e}") from e
 
 
 def has_tokens() -> bool:
@@ -121,3 +122,4 @@ def clear_tokens() -> None:
     conn.execute("DELETE FROM tokens WHERE service = ?", (SERVICE,))
     conn.commit()
     conn.close()
+    logger.info("LinkedIn tokens cleared from database")

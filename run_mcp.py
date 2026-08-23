@@ -11,6 +11,7 @@ repo = Path(__file__).resolve().parent
 if str(repo) not in sys.path:
     sys.path.insert(0, str(repo))
 
+from config.settings import MCP_AUTH_TOKEN
 from mcp_server import mcp
 
 
@@ -21,7 +22,18 @@ def main() -> int:
     parser.add_argument("--transport", default="sse", choices=["sse", "stdio"])
     args = parser.parse_args()
 
+    if args.host == "0.0.0.0" and not MCP_AUTH_TOKEN:
+        print(
+            "WARNING: MCP server is binding to 0.0.0.0 without MCP_AUTH_TOKEN. "
+            "Set MCP_AUTH_TOKEN in .env before exposing this to any network.",
+            file=sys.stderr,
+        )
+        print("Refusing to start. Set MCP_AUTH_TOKEN or bind to 127.0.0.1.", file=sys.stderr)
+        return 1
+
     print(f"Starting MCP server on {args.host}:{args.port} ({args.transport})", file=sys.stderr)
+    if MCP_AUTH_TOKEN:
+        print("MCP auth token is configured.", file=sys.stderr)
     mcp.run(transport=args.transport, host=args.host, port=args.port)
     return 0
 

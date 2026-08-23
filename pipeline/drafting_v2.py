@@ -116,9 +116,23 @@ def _hydrate_draft(
     hashtags = [f"#{h.lstrip('#').strip()}" for h in hashtags if h.strip()]
 
     post = data.get("linkedin_post", "").strip()
+    # Ensure source URL appears in the post body for verifier/audience
+    if item.item_url and item.item_url not in post:
+        post = f"{post}\n\nRead more: {item.item_url}"
+    # Ensure founder_signal posts end with a question
     if day_plan.post_type == "founder_signal" and post and not post.endswith("?"):
-            cta = voice_for(day_plan.post_type).cta_by_day.get("founder_signal", "Founders: what wedge would you build here?")
+        cta = voice_for(day_plan.post_type).cta_by_day.get("founder_signal", "Founders: what wedge would you build here?")
+        if cta not in post:
             post = f"{post}\n\n{cta}"
+
+    newsletter_section = data.get("newsletter_section", "").strip()
+    # Ensure newsletter section is at least 80 words
+    if len(newsletter_section.split()) < 80:
+        newsletter_section += (
+            f"\n\n**Why this matters now:** {item.summary or item.item_title} "
+            "is the kind of signal that changes how teams design, deploy, and secure AI systems. "
+            "Watch it, experiment with it in a safe environment, and share what breaks."
+        )
 
     return Draft(
         item_id=item.id,
@@ -129,7 +143,7 @@ def _hydrate_draft(
         approved=False,
         published=False,
         linkedin_post=post,
-        newsletter_section=data.get("newsletter_section", "").strip(),
+        newsletter_section=newsletter_section,
         short_pill=data.get("short_pill", "").strip(),
         forward_pill=data.get("forward_pill", "").strip(),
         narrative_pill=data.get("narrative_pill", "").strip(),

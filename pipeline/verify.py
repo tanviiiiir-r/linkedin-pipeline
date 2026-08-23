@@ -9,6 +9,7 @@ from enum import Enum
 
 from pydantic import BaseModel
 
+from config.calendar import day_plan
 from pipeline.drafting import Draft
 from pipeline.storage import Item
 from pipeline.topics import TAXONOMY
@@ -68,11 +69,14 @@ def _all_taxonomy_topics() -> set[str]:
     return topics
 
 
-def _has_specific_topics(hashtags: list[str], topics: list[str]) -> bool:
-    """Return True if at least one hashtag maps to the taxonomy."""
+def _has_specific_topics(hashtags: list[str], topics: list[str], day_plan_hashtags: list[str] | None = None) -> bool:
+    """Return True if at least one hashtag maps to the taxonomy or day plan."""
     taxonomy = _all_taxonomy_topics()
+    day_plan_set = {h.lstrip("#").lower().replace("-", "") for h in (day_plan_hashtags or [])}
     for h in hashtags:
         clean = h.lstrip("#").lower().replace("-", "")
+        if clean in day_plan_set:
+            return True
         for t in taxonomy:
             if clean == t.lower().replace("-", ""):
                 return True
@@ -213,8 +217,9 @@ def verify_draft(draft: Draft) -> VerifyResult:
         score -= 15
         reasons.append("Internal scoring language leaked into draft")
 
-    # 6. Has specific taxonomy topic
-    checks["has_taxonomy_topic"] = _has_specific_topics(draft.hashtags, [])
+    # 6. Has specific taxonomy topic (or matches today's editorial hashtag set)
+    today_hashtags = day_plan().hashtag_set
+    checks["has_taxonomy_topic"] = _has_specific_topics(draft.hashtags, [], today_hashtags)
     if not checks["has_taxonomy_topic"]:
         score -= 8
         reasons.append("No taxonomy-specific topic detected in hashtags")

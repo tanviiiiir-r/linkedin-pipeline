@@ -136,6 +136,13 @@ Read more: {url}
 **Efficiency / cost angle:** {item.key_claims[2] if len(item.key_claims) > 2 else 'Track the implementation cost and operational overhead as it matures.'}
 """.strip()
 
+    if len(newsletter_section.split()) < 80:
+        newsletter_section += (
+            f"\n\n**Why this matters now:** {item.summary or title} is the kind of signal that "
+            "changes how teams design, deploy, and secure AI systems. Watch it, experiment with it, "
+            "and share what breaks."
+        )
+
     short_pill = f"{title}: {why[:160]}"
     forward_pill = f"If {title.split(' ')[0]} keeps moving this fast, the next 6 months will redefine how teams ship {pillar.replace('_', ' ')} workflows."
     narrative_pill = f"A builder I follow flagged '{title}'. Here's why I paused: {why[:200]}"

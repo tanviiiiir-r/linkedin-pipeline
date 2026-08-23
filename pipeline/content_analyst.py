@@ -16,7 +16,7 @@ import requests
 
 from config.calendar import DayPlan, day_plan
 from config.settings import ANALYSIS_DIR, QUEUE_DIR, ensure_dirs
-from pipeline.drafting import Draft
+from pipeline.drafting import Draft, _parse_draft_markdown
 from pipeline.llm_client import complete, is_available
 from pipeline.storage import Item, load_item
 
@@ -170,8 +170,8 @@ def _llm_perfection(draft: Draft, day_plan: DayPlan) -> tuple[int, list[str], st
         f"Image path: {draft.image_path or 'none'}"
     )
     try:
-        resp = complete(system=system, user=user, json_mode=True, temperature=0.2)
-        data = json.loads(resp.content or "{}")
+        resp = complete(user, system=system, temperature=0.2)
+        data = json.loads(resp.text or "{}")
         score = int(data.get("score", 70))
         issues = [str(i) for i in data.get("issues", [])]
         notes = data.get("notes", "")
@@ -188,15 +188,16 @@ def perfection_score(draft: Draft, day_plan: DayPlan, use_llm: bool = True) -> t
 
 
 def load_drafts_from_queue(status: str | None = None) -> list[tuple[Draft, Path]]:
-    """Load Draft objects saved in the queue directory."""
+    """Load Draft objects saved as markdown in the queue directory."""
     drafts: list[tuple[Draft, Path]] = []
     if not QUEUE_DIR.exists():
         return drafts
-    for path in sorted(QUEUE_DIR.glob("*.json"), reverse=True):
+    for path in sorted(QUEUE_DIR.glob("*.md"), reverse=True):
         try:
-            data = json.loads(path.read_text())
-            drafts.append((Draft(**data), path))
-        except (json.JSONDecodeError, OSError):
+            draft = _parse_draft_markdown(path.read_text())
+            if draft:
+                drafts.append((draft, path))
+        except OSError:
             logger.warning("Skipping unreadable draft %s", path)
     return drafts
 

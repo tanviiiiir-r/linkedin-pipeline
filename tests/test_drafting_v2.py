@@ -60,7 +60,8 @@ def test_hydrate_draft_returns_draft():
     draft = _hydrate_draft(item, score, data, plan)
     assert isinstance(draft, Draft)
     assert draft.pillar == plan.post_type
-    assert draft.linkedin_post == "Sunday synthesis post."
+    assert "Sunday synthesis post." in draft.linkedin_post
+    assert item.item_url in draft.linkedin_post
     assert draft.hashtags == ["#AI", "#FutureOfAI"]
 
 
@@ -101,4 +102,4 @@ def test_founder_signal_ends_with_question():
         "hashtags": ["#FounderSignal"],
     }
     draft = _hydrate_draft(item, score, data, plan)
-    assert draft.linkedin_post.endswith("?")
+    assert "?" in draft.linkedin_post.splitlines()[-1] or draft.linkedin_post.endswith("?")

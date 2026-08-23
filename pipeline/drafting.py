@@ -30,6 +30,7 @@ class Draft(BaseModel):
     forward_pill: str = ""    # "what this enables next"
     narrative_pill: str = "" # storytelling version
     hashtags: list[str] = []
+    image_path: str = ""
 
 
 PILLAR_HASHTAGS = {

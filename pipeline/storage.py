@@ -44,6 +44,7 @@ class Item(BaseModel):
     reddit_score: int = 0
     reddit_comments: int = 0
     reddit_permalink: str = ""
+    image_path: str = ""
 
     model_config = {"extra": "ignore"}
 
@@ -78,6 +79,7 @@ def init_db() -> None:
             source_url TEXT NOT NULL,
             item_url TEXT NOT NULL UNIQUE,
             item_title TEXT NOT NULL,
+            image_path TEXT DEFAULT "",
             item_author TEXT,
             published_at TEXT,
             collected_at TEXT NOT NULL,
@@ -96,6 +98,11 @@ def init_db() -> None:
     )
     for idx in _ALLOWED_INDEX_COLUMNS:
         conn.execute(f"CREATE INDEX IF NOT EXISTS idx_items_{idx} ON items({idx})")
+    # Migration: ensure image_path column exists on older databases
+    try:
+        conn.execute("ALTER TABLE items ADD COLUMN image_path TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     conn.commit()
     conn.close()
 
@@ -181,21 +188,22 @@ def save_item(item: Item) -> Path:
         """
         INSERT INTO items (id, source_name, source_url, item_url, item_title, item_author,
             published_at, collected_at, source_type, content_type, summary, key_claims,
-            raw_content, pillar_candidates, topics, status, signal_strength, url_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            raw_content, pillar_candidates, topics, status, signal_strength, url_hash, image_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(item_url) DO UPDATE SET
             collected_at=excluded.collected_at,
             status=excluded.status,
             summary=excluded.summary,
             key_claims=excluded.key_claims,
-            raw_content=excluded.raw_content
+            raw_content=excluded.raw_content,
+            image_path=excluded.image_path
         """,
         (
             item.id, item.source_name, item.source_url, item.item_url, item.item_title,
             item.item_author, item.published_at, item.collected_at, item.source_type,
             item.content_type, item.summary, json.dumps(item.key_claims), item.raw_content,
             json.dumps(item.pillar_candidates), json.dumps(item.topics), item.status,
-            item.signal_strength, item.url_hash,
+            item.signal_strength, item.url_hash, item.image_path,
         ),
     )
     conn.commit()

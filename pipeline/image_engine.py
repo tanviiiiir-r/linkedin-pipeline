@@ -28,6 +28,7 @@ RUNPOD_API_KEY = __import__("os").getenv("RUNPOD_API_KEY", "")
 RUNPOD_POD_ID = __import__("os").getenv("RUNPOD_POD_ID", "")
 COMFY_PROXY_URL = __import__("os").getenv("COMFY_PROXY_URL", "")
 PAUSE_AFTER_SECONDS = int(__import__("os").getenv("PAUSE_AFTER_SECONDS", "300"))
+COMFY_INIT_DELAY_SECONDS = int(__import__("os").getenv("COMFY_INIT_DELAY_SECONDS", "300"))
 
 IMAGE_DIR = DATA_DIR / "images"
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
@@ -130,8 +131,8 @@ DEFAULT_FLUX_WORKFLOW = {
     },
     "27": {
         "inputs": {
-            "width": 1024,
-            "height": 1024,
+            "width": 1216,
+            "height": 704,
             "batch_size": 1
         },
         "class_type": "EmptySD3LatentImage",
@@ -163,21 +164,21 @@ def prompt_for_post(day: str, pillar: str, title: str, linkedin_post: str, hasht
 
     style_fragments = []
     if "tool" in pillar_lower or "monday" in day_lower:
-        style_fragments.append("clean SaaS product UI screenshot style, dark mode dashboard, subtle neon accents, minimal")  
+        style_fragments.append("clean abstract SaaS product hero card, dark mode, single icon plus tool-name area, minimal, 1.91:1 landscape")
     elif "viral" in pillar_lower or "tuesday" in day_lower:
-        style_fragments.append("bold editorial illustration, dramatic lighting, futuristic tech visual, eye-catching headline composition")
+        style_fragments.append("bold news-style editorial header, one strong visual metaphor, dynamic diagonal composition, glowing neural shapes, 1.91:1 landscape")
     elif "pattern" in pillar_lower or "wednesday" in day_lower:
-        style_fragments.append("abstract network diagram, interconnected nodes, data flow visualization, blue and purple gradient")
+        style_fragments.append("two connected panels with flowing data lines, inputs-to-output infographic, blue-purple gradient, 1.91:1 landscape")
     elif "builder" in pillar_lower or "thursday" in day_lower:
-        style_fragments.append("developer workspace aesthetic, code editor and terminal, warm desk lighting, practical engineering vibe")
+        style_fragments.append("cozy developer workspace, focused UI element with blurred screen glow, coffee cup, warm desk lighting, 1.91:1 landscape")
     elif "security" in pillar_lower or "friday" in day_lower:
-        style_fragments.append("cybersecurity visual, digital lock, shield, red-team aesthetic, dark background with warning amber")
+        style_fragments.append("dark cybersecurity editorial header, abstract lock-shield geometry, red-team amber glow, 1.91:1 landscape")
     elif "founder" in pillar_lower or "saturday" in day_lower:
-        style_fragments.append("founder at laptop in modern office, strategic mood, soft natural light, business-casual, focused")
+        style_fragments.append("strategic founder office scene, market-timing chart or whiteboard, soft natural light, back-or-side view, 1.91:1 landscape")
     elif "tomorrow" in pillar_lower or "sunday" in day_lower:
-        style_fragments.append("futuristic horizon, AI cityscape, optimistic dawn lighting, conceptual editorial illustration")
+        style_fragments.append("wide futuristic horizon, dawn cityscape silhouette, glowing data streams in sky, one central symbol, 1.91:1 landscape")
     else:
-        style_fragments.append("modern tech editorial illustration, clean composition, professional LinkedIn cover style")
+        style_fragments.append("modern tech editorial illustration, clean composition, professional LinkedIn cover style, 1.91:1 landscape")
 
     style = ", ".join(style_fragments)
 
@@ -190,7 +191,7 @@ def prompt_for_post(day: str, pillar: str, title: str, linkedin_post: str, hasht
     prompt = (
         f"Professional LinkedIn post header image about {base}. "
         f"{style}.{entity_clause} "
-        "No text, no words, no letters, no watermarks, no UI chrome, no people if possible. "
+        "Completely free of text, letters, numbers, logos, watermarks, trademarks, UI chrome, and readable labels. "
         "High quality, 8k, photorealistic or clean vector illustration, centered composition, safe for business audience."
     )
     return prompt
@@ -248,6 +249,14 @@ def _wait_for_running(timeout: int = 300) -> bool:
     return False
 
 
+def _wait_for_comfy_init() -> None:
+    """Pause briefly after the pod starts so ComfyUI can finish loading models."""
+    delay = max(0, COMFY_INIT_DELAY_SECONDS)
+    if delay:
+        logger.info("Waiting %ss for ComfyUI to finish initializing", delay)
+        time.sleep(delay)
+
+
 def _schedule_stop() -> None:
     if not PAUSE_AFTER_SECONDS:
         return
@@ -262,7 +271,7 @@ def _schedule_stop() -> None:
     threading.Thread(target=_do_stop, daemon=True).start()
 
 
-def _generate_with_comfy(prompt: str, output_path: Path, width: int = 1024, height: int = 1024) -> Path | None:
+def _generate_with_comfy(prompt: str, output_path: Path, width: int = 1216, height: int = 704) -> Path | None:
     if not COMFY_PROXY_URL:
         logger.warning("COMFY_PROXY_URL not set; skipping ComfyUI generation")
         return None
@@ -344,8 +353,8 @@ def image_for_post(
     pillar: str,
     linkedin_post: str,
     hashtags: str,
-    width: int = 1024,
-    height: int = 1024,
+    width: int = 1216,
+    height: int = 704,
     skip_comfy: bool = False,
     skip_og: bool = False,
 ) -> Path | None:
@@ -382,6 +391,7 @@ def image_for_post(
             if not _wait_for_running():
                 logger.error("RunPod pod did not start in time")
                 return None
+            _wait_for_comfy_init()
         result = _generate_with_comfy(prompt, output_path, width=width, height=height)
         return result
     except Exception:

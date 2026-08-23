@@ -29,9 +29,11 @@ from pipeline.checkpoints import write_daily_checkpoint
 from pipeline.collectors.instagram import collect_instagram
 from pipeline.collectors.reddit import collect_reddit
 from pipeline.collectors.youtube import collect_youtube
+from pipeline.content_analyst import run_analysis
 from pipeline.dedupe import find_duplicate
 from pipeline.drafting import Draft, compile_newsletter, draft_item, load_drafts, save_draft
 from pipeline.drafting_v2 import draft_item_v2
+from pipeline.image_engine import image_for_post
 from pipeline.invariants import run_health_checks
 from pipeline.log import setup_logging
 from pipeline.publishers.composio import (
@@ -540,6 +542,8 @@ def cmd_draft_today(args) -> int:
     target_date = _date.fromisoformat(date_override) if date_override else None
     plan = day_plan(target_date)
     dry_run = getattr(args, "dry_run", False)
+    with_image = getattr(args, "with_image", False)
+    force_comfy = getattr(args, "force_comfy", False)
 
     candidates = list_items(status="worthy", limit=args.limit * 5)
     if not candidates:
@@ -557,11 +561,33 @@ def cmd_draft_today(args) -> int:
     queued = 0
     for item, score in selected:
         draft = draft_item_v2(item, score, day_plan=plan)
+
+        if with_image or force_comfy:
+            img_path = image_for_post(
+                item_url=item.item_url,
+                title=draft.title,
+                day=plan.day_name,
+                pillar=plan.post_type,
+                linkedin_post=draft.linkedin_post,
+                hashtags=" ".join(draft.hashtags),
+                skip_og=force_comfy,
+            )
+            if img_path:
+                draft.image_path = str(img_path)
+                # Persist image path on the source item so future drafts can reuse it
+                item.image_path = str(img_path)
+                try:
+                    save_item(item)
+                except Exception:
+                    logger.exception("Failed to persist item image_path")
+
         if dry_run:
             print(f"\n--- DRY-RUN DRAFT ({plan.day_name}, {plan.post_type}) ---")
             print(f"Title: {draft.title}")
             print(f"Source: {draft.source_url}")
             print(f"Hashtags: {' '.join(draft.hashtags)}")
+            if draft.image_path:
+                print(f"Image: {draft.image_path}")
             print("\nLinkedIn post:")
             print(draft.linkedin_post)
             print("--- END DRY-RUN ---")
@@ -709,6 +735,18 @@ def cmd_linkedin_logout(args) -> int:
     return 0
 
 
+def cmd_analyze_content(args) -> int:
+    """Run daily relevance + perfection analysis on queued drafts."""
+    from datetime import date as _date
+    date_override = getattr(args, "date", None)
+    target_date = _date.fromisoformat(date_override) if date_override else None
+    use_llm = not getattr(args, "no_llm", False)
+    limit = getattr(args, "limit", 10)
+    report_path = run_analysis(for_date=target_date, use_llm=use_llm, limit=limit)
+    print(f"Analysis report saved: {report_path}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="hermes", description="LinkedIn content pipeline")
     parser.add_argument("--dry-run", action="store_true", help="Do not persist anything external")
@@ -796,10 +834,18 @@ def main(argv: list[str] | None = None) -> int:
     p_logout = sub.add_parser("linkedin-logout", help="Clear stored LinkedIn tokens")
     p_logout.set_defaults(func=cmd_linkedin_logout)
 
+    p_analyze = sub.add_parser("analyze-content", help="Run daily relevance + perfection analysis on queued drafts")
+    p_analyze.add_argument("--date", default=None, help="Override date (YYYY-MM-DD) for testing")
+    p_analyze.add_argument("--no-llm", action="store_true", help="Use rule-based heuristics instead of LLM")
+    p_analyze.add_argument("--limit", type=int, default=10, help="Maximum drafts to analyze")
+    p_analyze.set_defaults(func=cmd_analyze_content)
+
     p_draft_today = sub.add_parser("draft-today", help="Draft today's post using the 7-day calendar + LLM humanizer")
     p_draft_today.add_argument("--limit", type=int, default=1, help="Number of draft candidates to produce")
     p_draft_today.add_argument("--dry-run", action="store_true", help="Print draft without saving")
     p_draft_today.add_argument("--date", default=None, help="Override date (YYYY-MM-DD) for testing")
+    p_draft_today.add_argument("--with-image", action="store_true", dest="with_image", help="Generate or fetch an image for the draft (OG first, then ComfyUI)")
+    p_draft_today.add_argument("--force-comfy", action="store_true", dest="force_comfy", help="Always generate a fresh ComfyUI image (skips OpenGraph fallback)")
     p_draft_today.set_defaults(func=cmd_draft_today)
 
     args = parser.parse_args(argv)

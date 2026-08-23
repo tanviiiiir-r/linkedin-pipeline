@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DONE — linkedin-pipeline</title>
+  <style>
+    :root{ --bg:#0f1115; --card:#161922; --line:#2a2f3a; --ok:#4ade80; --warn:#facc15; --bad:#f87171; --mut:#94a3b8; --txt:#e2e8f0; }
+    body{ font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--txt); line-height:1.55; padding:24px; }
+    .wrap{ max-width:920px; margin:0 auto; }
+    h1{ margin:0 0 8px; font-size:28px; }
+    .sub{ color:var(--mut); margin-bottom:24px; }
+    h2{ font-size:18px; margin-top:32px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+    .card{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin:14px 0; }
+    .locked{ border-color:var(--warn); }
+    .gate{ display:flex; align-items:flex-start; gap:12px; margin:10px 0; }
+    .box{ width:18px; height:18px; border:2px solid var(--mut); border-radius:4px; flex-shrink:0; margin-top:2px; }
+    .ok .box{ background:var(--ok); border-color:var(--ok); }
+    .label{ color:var(--txt); }
+    table{ width:100%; border-collapse:collapse; font-size:14px; }
+    th,td{ text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); }
+    th{ color:var(--mut); font-weight:600; }
+    .pill{ display:inline-block; padding:2px 10px; border-radius:999px; border:1px solid var(--line); color:var(--mut); font-size:12px; }
+    .pill.ok{ color:var(--ok); border-color:var(--ok); }
+    .pill.wip{ color:var(--warn); border-color:var(--warn); }
+    .note{ color:var(--mut); font-size:13px; }
+    code{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0d1117; padding:2px 5px; border-radius:4px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>DONE — linkedin-pipeline</h1>
+  <p class="sub">The single source of truth for <b>what "done" means</b> and <b>the implementation plan</b>.<br>
+     This file is <b>LOCKED</b> — the driver model may not edit it without explicit user request.<br>
+     Updated: 2026-08-23</p>
+
+  <h2>1 · The Locked Spec (what we are building)</h2>
+  <div class="card locked">
+    <p><b>Cognitive job:</b> Collect, score, draft, and queue AI-builder content for LinkedIn with a human approval gate.</p>
+    <p><b>Inputs:</b> RSS/Atom, GitHub, Reddit, YouTube, Instagram, big-tech blogs, manual YouTube URLs.
+       &nbsp;→&nbsp; <b>Outputs:</b> Scored items, LinkedIn drafts, newsletter sections, published posts, checkpoints.</p>
+    <p><b>Autonomy level:</b> bounded &nbsp;|&nbsp; <b>Human-in-the-loop points:</b> draft approval before publish; LinkedIn OAuth by operator</p>
+    <p><b>Failure tolerance:</b> collection failures must not crash daily run; publish failures visible/recoverable.
+       &nbsp;|&nbsp; <b>Trust boundary:</b> agent cannot post or store tokens without operator action.</p>
+    <p class="note">Derived from <code>.genesis/PROJECT-BRIEF.md</code>. Change scope by editing the brief and surfacing to the user, not silently.</p>
+  </div>
+
+  <h2>2 · Definition of Done (binary gates — checked by the VERIFIER)</h2>
+  <div class="card">
+    <div class="gate"><span class="box"></span><span class="label">Scope matches the locked spec in section 1</span></div>
+    <div class="gate"><span class="box"></span><span class="label">Dependency direction inward, zero cycles <span class="note">(modular-architecture gate)</span></span></div>
+    <div class="gate"><span class="box"></span><span class="label">Every outbound call has a timeout / circuit-breaker <span class="note">(production-readiness gate)</span></span></div>
+    <div class="gate"><span class="box"></span><span class="label">All LLM/structured outputs validated against a schema <span class="note">(llmops gate)</span></span></div>
+    <div class="gate"><span class="box"></span><span class="label">Threat model written; prompt-injection / untrusted-input considered <span class="note">(security gate)</span></span></div>
+    <div class="gate"><span class="box"></span><span class="label"><code>python -m pytest tests/</code> green AND ruff clean in CI</span></div>
+    <div class="gate"><span class="box"></span><span class="label">One <code>gsd-code-review --depth=deep</code> pass by a <b>separate</b> context/model (L4)</span></div>
+    <div class="gate"><span class="box"></span><span class="label">No <code>context-graph.json</code> invariant violated by the change</span></div>
+    <div class="gate"><span class="box"></span><span class="label">PR description / ship notes written if shipping (<code>gsd-ship</code>)</span></div>
+    <p class="note">A milestone is DONE only when every box above is checked by the verifier. The maker does not grade its own work.</p>
+  </div>
+
+  <h2>3 · Implementation Plan (the work, sliced into milestones)</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>#</th><th>Milestone</th><th>Phase</th><th>Demo command (proves it works)</th><th>Loops</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>M1</td><td>Baseline code review of existing codebase</td><td>review</td><td><code>cat .genesis/checkpoints/M1-REVIEW.md | grep -c "^### "</code></td><td>L1, L4</td><td><span class="pill wip">wip</span></td></tr>
+        <tr><td>M2</td><td>MCP server auth + VPS deployment artifacts</td><td>build</td><td><code>curl -H "Authorization: Bearer $MCP_AUTH_TOKEN" http://$VIP:8000/sse</code></td><td>L1, L3, L4</td><td><span class="pill">todo</span></td></tr>
+        <tr><td>M3</td><td>VPS deploy + Hermes integration + live dry-run publish</td><td>ship</td><td><code>docker exec hermes-agent-xqcr-hermes-agent-1 curl -s http://172.18.0.1:8000/sse</code></td><td>L1, L2, L4</td><td><span class="pill">todo</span></td></tr>
+      </tbody>
+    </table>
+    <p class="note">Total token budget = 3 × 25000. Update <span class="pill wip">wip</span> /
+       <span class="pill ok">done</span> as loops complete. This table is mirrored in <code>PLAN.md</code> for the agent to parse.</p>
+  </div>
+
+  <h2>4 · Skill Loading Per Milestone</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>Milestone</th><th>Always-on canon</th><th>Milestone-specific skills</th></tr></thead>
+      <tbody>
+        <tr><td>M1</td><td>GSD suite, modular-architecture, production-readiness</td><td>tdd, security-engineering</td></tr>
+        <tr><td>M2</td><td>GSD suite, modular-architecture, production-readiness</td><td>security-engineering, devops</td></tr>
+        <tr><td>M3</td><td>GSD suite, modular-architecture, production-readiness</td><td>security-engineering, devops, vercel-deploy</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>5 · Context & Constraints</h2>
+  <div class="card">
+    <p><b>VPS:</b> Hostinger 186.241.23.161; Hermes Agent v0.20.4 in Docker; Ollama on host at 127.0.0.1:11434.</p>
+    <p><b>LinkedIn:</b> free API v2 direct OAuth (Share on LinkedIn + Sign In with LinkedIn using OpenID Connect).</p>
+    <p><b>Storage:</b> SQLite + markdown locally; optional Supabase PostgreSQL.</p>
+    <p><b>Frozen for M1:</b> All source files may be read but not edited. Only <code>.genesis/</code> artifacts may be written.</p>
+  </div>
+
+</div>
+</body>
+</html>

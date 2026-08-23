@@ -1,0 +1,46 @@
+{
+  "project": "{{PROJECT_NAME}}",
+  "generated": "{{DATE}}",
+  "source": "graphify update .",
+  "invariants": [
+    {
+      "id": "inv-1",
+      "name": "No cyclic dependencies",
+      "description": "Dependency graph must be acyclic. Circular imports or module cycles are not allowed.",
+      "check": "graphify query 'cycles in dependency graph'",
+      "severity": "blocking"
+    },
+    {
+      "id": "inv-2",
+      "name": "Bounded context boundaries respected",
+      "description": "Files in one bounded context may not import internals of another bounded context directly.",
+      "check": "graphify query 'cross-context imports'",
+      "severity": "blocking"
+    },
+    {
+      "id": "inv-3",
+      "name": "Outbound calls have resilience",
+      "description": "Every network/IO call has a timeout, retry, or circuit-breaker policy.",
+      "check": "manual review during L4 VERIFY",
+      "severity": "blocking"
+    },
+    {
+      "id": "inv-4",
+      "name": "LLM outputs validated",
+      "description": "All structured LLM outputs are validated against a schema before use.",
+      "check": "grep for .parse / .validate / zod usage near LLM call sites",
+      "severity": "blocking"
+    },
+    {
+      "id": "inv-5",
+      "name": "Test coverage for critical paths",
+      "description": "Every milestone's demo command must have an automated test or be manually verified and recorded.",
+      "check": "{{TEST_CMD}} covers demo scenario",
+      "severity": "warning"
+    }
+  ],
+  "notes": [
+    "Run `graphify update .` after every code change to keep this graph current.",
+    "Add milestone-specific invariants as they become relevant."
+  ]
+}

@@ -1,36 +1,35 @@
 # CURRENT — linkedin-pipeline
 
-**Last updated:** 2026-08-24 16:51
+**Last updated:** 2026-08-24 23:54 UTC+3
 **Active milestone:** M3 — VPS deploy + Hermes integration + live dry-run publish
-**Status:** M2.6 ✅ DONE; M3 🔄 IN PROGRESS.
+**Status:** M2.6 ✅ DONE; dashboard v3 ✅ DONE; M3 🔄 IN PROGRESS (deployment artifacts ready, live deploy pending VPS access).
 
 ## M2.6 verification result
 
 - **L4 verdict:** APPROVE (`.genesis/checkpoints/M2.6-VERIFY.md`).
 - **Review findings:** 0 Critical, 0 Warning (2 resolved), 3 Info.
-- **Tests:** 57 passed.
+- **Tests:** 60 passed.
 - **Lint:** ruff clean.
 
-## M2.6 what is live
+## What is live
 
-- `RECENCY_POLICY` constants in `config/settings.py` with `planned_selection_floor`.
+- `RECENCY_POLICY` constants with `planned_selection_floor`.
 - `Item` fields `queue_type`, `expires_at`, `engagement`.
-- `pipeline/freshness.py` recency/engagement gates + source-aware generic bonus.
-- All collectors produce timestamps and engagement metadata.
-- `pipeline/calendar.py` hybrid selection: breaking → planned (with floor) → no_strong_signal.
-- `pipeline/scoring.py` founder_signal pillar + generic engagement boost.
-- `pipeline/hermes.py` and `mcp_server.py` handle tuple return/no-signal path.
-- Branch `codex/hybrid-calendar-v3` committed and ready to push.
+- `pipeline/freshness.py` recency/engagement gates.
+- `pipeline/calendar.py` hybrid selection: breaking → planned evergreen fallback → no_strong_signal.
+- `pipeline/scoring.py` founder_signal pillar + engagement boost.
+- `plan-content` CLI for seeding planned evergreen items.
+- `pipeline/review_dashboard.py` v3: light-studio LinkedIn-style preview, progress bars, toasts.
+- Branch `codex/hybrid-calendar-v3` pushed.
 
-## What remains (M3)
+## M3 remaining
 
-1. Push `codex/hybrid-calendar-v3` and merge to `main`.
-2. Deploy updated repo to Hostinger VPS.
-3. Start MCP server + review dashboard server via systemd.
-4. Configure Traefik routes with basic auth.
-5. End-to-end dry run: collect → score → draft-today --with-image → review → approve → publish --dry-run.
-6. Verify Hermes container can reach MCP server and review server.
+1. Deploy updated repo to Hostinger VPS.
+2. Start MCP server + review dashboard server via systemd.
+3. Configure Traefik routes with basic auth.
+4. End-to-end dry run: collect → score → draft-today --with-image → review → approve → publish --dry-run.
+5. Verify Hermes container can reach MCP server and review server.
 
 ## Blockers
 
-- None.
+- VPS SSH access / deployment credentials not available to this session.

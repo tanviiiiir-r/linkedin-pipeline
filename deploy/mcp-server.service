@@ -1,0 +1,17 @@
+[Unit]
+Description=LinkedIn Pipeline MCP Server
+After=network.target
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+WorkingDirectory=/opt/linkedin-pipeline
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/opt/linkedin-pipeline/.env
+ExecStart=/opt/linkedin-pipeline/.venv/bin/python mcp_server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

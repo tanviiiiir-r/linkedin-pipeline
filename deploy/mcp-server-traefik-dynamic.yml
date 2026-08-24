@@ -1,0 +1,23 @@
+http:
+  routers:
+    linkedin-mcp:
+      rule: "Host(`mcp.hermes-agent-xqcr.srv1921473.hstgr.cloud`)"
+      entrypoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      service: linkedin-mcp
+      middlewares:
+        - linkedin-mcp-auth
+  services:
+    linkedin-mcp:
+      loadBalancer:
+        servers:
+          - url: "http://172.18.0.1:8000"
+  middlewares:
+    linkedin-mcp-auth:
+      basicAuth:
+        users:
+          # Generate with: htpasswd -nb hermes YOUR_PASSWORD | sed 's/\$/$$/g'
+          # Replace the line below with your actual hash.
+          - "hermes:CHANGEME"

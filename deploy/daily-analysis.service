@@ -1,0 +1,12 @@
+[Unit]
+Description=LinkedIn Pipeline Daily Analysis + Dashboard Regen
+After=network.target
+
+[Service]
+Type=oneshot
+User=hermes
+Group=hermes
+WorkingDirectory=/opt/linkedin-pipeline
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/opt/linkedin-pipeline/.env
+ExecStart=/opt/linkedin-pipeline/scripts/daily.sh

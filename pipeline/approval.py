@@ -42,3 +42,49 @@ def mark_published(item_id: str) -> bool:
         if _update_frontmatter(path, item_id, "published", True):
             return True
     return False
+
+
+def _find_draft_path(item_id: str) -> Path | None:
+    for path in sorted(QUEUE_DIR.glob("*.md"), reverse=True):
+        text = path.read_text()
+        draft = _parse_draft_markdown(text)
+        if draft and draft.item_id == item_id:
+            return path
+    return None
+
+
+def edit_draft(item_id: str, linkedin_post: str) -> bool:
+    """Update the LinkedIn post body of a queued draft, keeping a .bak copy."""
+    path = _find_draft_path(item_id)
+    if not path:
+        return False
+    text = path.read_text()
+    draft = _parse_draft_markdown(text)
+    if not draft:
+        return False
+    draft.linkedin_post = linkedin_post.strip()
+    backup = path.with_suffix(".md.bak")
+    backup.write_text(text)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(_draft_markdown(draft))
+    tmp.replace(path)
+    return True
+
+
+def skip_draft(item_id: str, skipped_dir: Path | None = None) -> bool:
+    """Move a queued draft to a skipped folder (default: QUEUE_DIR/skipped).
+
+    Returns True if a draft was moved. Idempotent: if already skipped, returns True.
+    """
+    path = _find_draft_path(item_id)
+    if not path:
+        return False
+    skipped = skipped_dir or (QUEUE_DIR / "skipped")
+    skipped.mkdir(parents=True, exist_ok=True)
+    dest = skipped / path.name
+    if dest.exists():
+        # Idempotency: overwrite with the latest version
+        path.replace(dest)
+    else:
+        path.rename(dest)
+    return True

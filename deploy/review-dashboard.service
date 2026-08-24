@@ -1,0 +1,17 @@
+[Unit]
+Description=LinkedIn Pipeline Review Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+WorkingDirectory=/opt/linkedin-pipeline
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/opt/linkedin-pipeline/.env
+ExecStart=/opt/linkedin-pipeline/.venv/bin/python run.py review-server --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

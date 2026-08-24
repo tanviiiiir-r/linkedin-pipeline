@@ -34,6 +34,8 @@ from pipeline.dedupe import find_duplicate
 from pipeline.drafting import Draft, compile_newsletter, draft_item, load_drafts, save_draft
 from pipeline.drafting_v2 import draft_item_v2
 from pipeline.image_engine import image_for_post
+from pipeline.review_dashboard import generate_dashboard
+from pipeline.review_server import run_server
 from pipeline.invariants import run_health_checks
 from pipeline.log import setup_logging
 from pipeline.publishers.composio import (
@@ -735,6 +737,28 @@ def cmd_linkedin_logout(args) -> int:
     return 0
 
 
+
+
+def cmd_review_dashboard(args) -> int:
+    """Generate the static review dashboard HTML from pending drafts."""
+    init_db()
+    ensure_dirs()
+    path = generate_dashboard()
+    print(f"Review dashboard generated: {path}")
+    print(f"Start server with: python run.py review-server")
+    return 0
+
+
+def cmd_review_server(args) -> int:
+    """Start the tiny HTTP review server."""
+    init_db()
+    ensure_dirs()
+    host = getattr(args, "host", "0.0.0.0")
+    port = getattr(args, "port", 8080)
+    run_server(host=host, port=port)
+    return 0
+
+
 def cmd_analyze_content(args) -> int:
     """Run daily relevance + perfection analysis on queued drafts."""
     from datetime import date as _date
@@ -847,6 +871,14 @@ def main(argv: list[str] | None = None) -> int:
     p_draft_today.add_argument("--with-image", action="store_true", dest="with_image", help="Generate or fetch an image for the draft (OG first, then ComfyUI)")
     p_draft_today.add_argument("--force-comfy", action="store_true", dest="force_comfy", help="Always generate a fresh ComfyUI image (skips OpenGraph fallback)")
     p_draft_today.set_defaults(func=cmd_draft_today)
+
+    p_review_dashboard = sub.add_parser("review-dashboard", help="Generate static HTML review dashboard for pending drafts")
+    p_review_dashboard.set_defaults(func=cmd_review_dashboard)
+
+    p_review_server = sub.add_parser("review-server", help="Start tiny HTTP server for the review dashboard")
+    p_review_server.add_argument("--host", default="0.0.0.0", help="Bind address")
+    p_review_server.add_argument("--port", type=int, default=8080, help="Bind port")
+    p_review_server.set_defaults(func=cmd_review_server)
 
     args = parser.parse_args(argv)
     if not args.command:

@@ -506,57 +506,21 @@ h1 {{
   margin: 0 auto;
   overflow: hidden;
 }}
-.ln-header {{
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-}}
-.ln-avatar {{
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #0a66c2, #0077b5);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 17px;
-  flex-shrink: 0;
-}}
-.ln-meta {{
-  flex: 1;
-  min-width: 0;
-}}
-.ln-name {{
-  font-size: 14px;
-  font-weight: 600;
-  color: #000;
-}}
-.ln-headline,
-.ln-time {{
-  font-size: 12px;
-  color: var(--ln-muted);
-  line-height: 1.35;
-}}
-.ln-more {{
-  color: var(--ln-muted);
-  font-size: 18px;
-  cursor: default;
+.ln-post.minimal {{
+  padding: 16px;
 }}
 .ln-body {{
-  padding: 0 16px 12px;
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 15px;
+  line-height: 1.55;
   color: var(--ln-txt);
   white-space: pre-wrap;
+  margin-bottom: 10px;
 }}
 .ln-hashtags {{
-  padding: 0 16px 12px;
   color: var(--ln-link);
   font-size: 14px;
   font-weight: 600;
+  margin-bottom: 14px;
 }}
 .ln-hashtags span {{
   margin-right: 6px;
@@ -608,16 +572,6 @@ h1 {{
   padding: 10px 16px;
   font-size: 12px;
   color: var(--ln-muted);
-}}
-.ln-engagement {{
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 16px;
-  border-top: 1px solid var(--ln-line);
-  color: var(--ln-muted);
-  font-size: 13px;
-  font-weight: 600;
 }}
 .quality-card {{
   background: var(--surface);
@@ -725,9 +679,8 @@ code {{
   .site-header .wrap {{ flex-direction: column; align-items: flex-start; }}
   .today {{ text-align: left; }}
   .site-nav .wrap {{ flex-direction: column; align-items: flex-start; gap: 10px; }}
-  .ln-header {{ padding: 10px 12px; }}
-  .ln-avatar {{ width: 40px; height: 40px; font-size: 14px; }}
-  .ln-body, .ln-hashtags {{ padding-left: 12px; padding-right: 12px; }}
+  .ln-post.minimal {{ padding: 12px; }}
+  .ln-body {{ font-size: 14px; }}
   .draft-card {{ padding: 16px; }}
 }}
 '''

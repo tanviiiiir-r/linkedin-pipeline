@@ -115,25 +115,10 @@ def _draft_card(draft: Draft, analysis: dict | None, image_rel: str | None) -> s
         issues_html = f"      <ul class=\"issues\"\u003e\n{issues_html}\n      </ul\u003e"
 
     linkedin_preview = f'''
-    <div class="ln-post">
-      <div class="ln-header">
-        <div class="ln-avatar">TR</div>
-        <div class="ln-meta">
-          <div class="ln-name">Tanvir Rahman</div>
-          <div class="ln-headline">AI builder · Founder signal</div>
-          <div class="ln-time">1h · 🌐</div>
-        </div>
-        <div class="ln-more">⋯</div>
-      </div>
+    <div class="ln-post minimal">
       <div class="ln-body" id="post-{html.escape(draft.item_id)}">{body_html}</div>
       <div class="ln-hashtags">{hashtags}</div>
 {_link_preview(draft, image_rel)}
-      <div class="ln-engagement">
-        <span>👍 Like</span>
-        <span>💬 Comment</span>
-        <span>🔄 Repost</span>
-        <span>✈️ Send</span>
-      </div>
     </div>'''
 
     return f'''
@@ -751,8 +736,9 @@ async function regenerateImage(id) {{
     const imgHtml = `<div class="ln-image"><img src="${{data.image_url}}" alt="" /></div>`;
     if (box) box.outerHTML = imgHtml;
     else {{
-      const engagement = card.querySelector('.ln-engagement');
-      engagement.insertAdjacentHTML('beforebegin', imgHtml);
+      const hashtags = card.querySelector('.ln-hashtags');
+      if (hashtags) hashtags.insertAdjacentHTML('afterend', imgHtml);
+      else card.querySelector('.ln-post').insertAdjacentHTML('beforeend', imgHtml);
     }}
   }}
   alert(data.ok ? 'Image regenerated' : 'Failed: ' + (data.error || 'unknown'));

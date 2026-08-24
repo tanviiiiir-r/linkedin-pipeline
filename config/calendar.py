@@ -129,5 +129,8 @@ def day_plan(for_date: date | None = None) -> DayPlan:
     return _DAY_PLANS[d.strftime("%A")]
 
 
+DAY_NAMES: dict[str, DayPlan] = _DAY_PLANS
+
+
 def post_type_for_date(for_date: date | None = None) -> str:
     return day_plan(for_date).post_type

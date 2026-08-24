@@ -55,7 +55,7 @@ def test_reddit_low_engagement_rejected():
 
 def test_reddit_high_engagement_passes():
     i = _item("reddit", 12, engagement={"score": 120, "comments": 35})
-    ok, reason = passes_recency_gate(i)
+    ok, _reason = passes_recency_gate(i)
     assert ok
     assert engagement_score(i) > 0
 
@@ -69,7 +69,7 @@ def test_stale_evergreen_demoted():
 
 def test_fresh_evergreen_with_release_allowed():
     i = _item("rss", 12, title="New MCP repo launched")
-    ok, reason = passes_recency_gate(i)
+    ok, _reason = passes_recency_gate(i)
     assert ok
 
 

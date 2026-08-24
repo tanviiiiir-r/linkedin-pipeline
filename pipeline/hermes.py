@@ -44,7 +44,15 @@ from pipeline.publishers.linkedin import DirectLinkedInPublisher, DryRunPublishe
 from pipeline.review_dashboard import generate_dashboard
 from pipeline.review_server import run_server
 from pipeline.scoring import is_worthy, score_item
-from pipeline.storage import Item, init_db, item_exists, list_items, save_item, update_status
+from pipeline.storage import (
+    Item,
+    init_db,
+    item_exists,
+    list_items,
+    save_item,
+    save_planned_item,
+    update_status,
+)
 from pipeline.tokens import clear_tokens, load_tokens, save_tokens
 from pipeline.topics import extract_topics
 from pipeline.verify import format_verdict, verify_draft
@@ -570,6 +578,100 @@ def cmd_draft(args) -> int:
 
 
 
+
+
+def cmd_plan_content(args: argparse.Namespace) -> int:
+    """Seed planned evergreen items for upcoming day types.
+
+    Accepts either an interactive prompt (--interactive) or a single item
+    (--title, --summary, --day, optional --url). Saves to PLANNED_DIR so the
+    hybrid calendar can pull them when breaking signals are weak.
+    """
+    from datetime import date, datetime, timedelta, timezone
+
+    from config.calendar import day_plan
+
+    init_db()
+    ensure_dirs()
+
+    dry_run = getattr(args, "dry_run", False)
+    if args.interactive:
+        print("Plan evergreen content for upcoming days. Leave title blank to finish.")
+        items: list[Item] = []
+        while True:
+            title = input("Title (or Enter to finish): ").strip()
+            if not title:
+                break
+            summary = input("Summary: ").strip()
+            raw = input("Raw content / notes: ").strip()
+            day = input("Day (Monday-Sunday, default today): ").strip()
+            target_day = day_plan(date.fromisoformat(args.date) if args.date else None)
+            if day:
+                from config.calendar import _DAY_PLANS
+                day_key = day.title()
+                if day_key in _DAY_PLANS:
+                    target_day = _DAY_PLANS[day_key]
+            expires_input = input("Expires in days (default 14): ").strip()
+            expires_days = int(expires_input) if expires_input.isdigit() else 14
+            expires_at = (datetime.now(timezone.utc) + timedelta(days=expires_days)).isoformat()
+            item = Item(
+                source_name="manual",
+                source_url="https://example.com/manual",
+                item_url=args.url or f"https://example.com/manual/{title.lower().replace(chr(32), chr(45))[:40]}",
+                item_title=title,
+                source_type="manual",
+                content_type="article",
+                summary=summary,
+                raw_content=raw,
+                queue_type="planned",
+                expires_at=expires_at,
+                published_at=datetime.now(timezone.utc).isoformat(),
+            )
+            items.append(item)
+        if not items:
+            print("No items provided.")
+            return 0
+        if dry_run:
+            print(f"Would plan {len(items)} item(s):")
+            for it in items:
+                print(f"- [{it.expires_at[:10]}] {it.item_title}")
+            return 0
+        for it in items:
+            save_planned_item(it)
+        print(f"Planned {len(items)} evergreen item(s).")
+        return 0
+
+    # Non-interactive single item
+    if not args.title or not args.summary:
+        print("--title and --summary are required (or use --interactive).")
+        return 1
+    target_day = day_plan(date.fromisoformat(args.date) if args.date else None)
+    if args.day:
+        from config.calendar import _DAY_PLANS
+        day_key = args.day.title()
+        if day_key in _DAY_PLANS:
+            target_day = _DAY_PLANS[day_key]
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=args.expires_days)).isoformat()
+    item = Item(
+        source_name=args.source or "manual",
+        source_url=args.url or "https://example.com/manual",
+        item_url=args.url or f"https://example.com/manual/{args.title.lower().replace(chr(32), chr(45))[:40]}",
+        item_title=args.title,
+        source_type="manual",
+        content_type="article",
+        summary=args.summary,
+        raw_content=args.raw or "",
+        queue_type="planned",
+        expires_at=expires_at,
+        published_at=datetime.now(timezone.utc).isoformat(),
+    )
+    if dry_run:
+        print(f"Would plan: [{expires_at[:10]}] {item.item_title} for {target_day.day_name}")
+        return 0
+    path = save_planned_item(item)
+    print(f"Planned item saved: {path}")
+    return 0
+
 def cmd_draft_today(args) -> int:
     """Draft today's post using the LLM humanizer and the 7-day calendar."""
     init_db()
@@ -914,6 +1016,19 @@ def main(argv: list[str] | None = None) -> int:
     p_analyze.add_argument("--no-llm", action="store_true", help="Use rule-based heuristics instead of LLM")
     p_analyze.add_argument("--limit", type=int, default=10, help="Maximum drafts to analyze")
     p_analyze.set_defaults(func=cmd_analyze_content)
+
+    p_plan_content = sub.add_parser("plan-content", help="Seed planned evergreen items for the hybrid calendar")
+    p_plan_content.add_argument("--title", help="Item title")
+    p_plan_content.add_argument("--summary", help="Short summary")
+    p_plan_content.add_argument("--raw", help="Raw content / notes")
+    p_plan_content.add_argument("--url", help="Source URL")
+    p_plan_content.add_argument("--source", help="Source name (default: manual)")
+    p_plan_content.add_argument("--day", help="Day of week (Monday-Sunday) to target")
+    p_plan_content.add_argument("--date", help="Override date (YYYY-MM-DD) for day lookup")
+    p_plan_content.add_argument("--expires-days", type=int, default=14, help="Days until planned item expires")
+    p_plan_content.add_argument("--interactive", action="store_true", help="Interactive multi-item prompt")
+    p_plan_content.add_argument("--dry-run", action="store_true", help="Print without saving")
+    p_plan_content.set_defaults(func=cmd_plan_content)
 
     p_draft_today = sub.add_parser("draft-today", help="Draft today's post using the 7-day calendar + LLM humanizer")
     p_draft_today.add_argument("--limit", type=int, default=1, help="Number of draft candidates to produce")

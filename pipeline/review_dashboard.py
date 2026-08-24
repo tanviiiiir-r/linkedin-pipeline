@@ -97,6 +97,13 @@ def re_sub_bullets(text: str) -> str:
     return re.sub(r"(^|<br /\u003e)([•·\-\*])\s+", r"\1\2 ", text)
 
 
+
+
+def _progress_bar(score: int) -> str:
+    pct = max(0, min(100, score))
+    return f'<span class="progress"><div style="width:{pct}%"></div></span>'
+
+
 def _draft_card(draft: Draft, analysis: dict | None, image_rel: str | None) -> str:
     title_escaped = html.escape(draft.title)
     body_html = _format_post_body(draft.linkedin_post)
@@ -112,13 +119,31 @@ def _draft_card(draft: Draft, analysis: dict | None, image_rel: str | None) -> s
     issues_html = ""
     if issues:
         issues_html = "\n".join(f"        <li>{html.escape(str(i))}</li>" for i in issues)
-        issues_html = f"      <ul class=\"issues\"\u003e\n{issues_html}\n      </ul\u003e"
+        issues_html = f"      <ul class=\"issues\">\n{issues_html}\n      </ul>"
+
+    initials = "".join(w[0] for w in (draft.pillar or "draft").replace("_", " ").split()[:2]).upper()[:2]
+    now = datetime.now(timezone.utc).strftime("%b %d • Just now")
 
     linkedin_preview = f'''
-    <div class="ln-post minimal">
+    <div class="ln-post">
+      <div class="ln-author">
+        <div class="ln-avatar">{initials}</div>
+        <div class="ln-author-info">
+          <div class="ln-name">You</div>
+          <div class="ln-headline">Creator • {html.escape(draft.pillar.replace("_", " ").title())}</div>
+          <div class="ln-time">{now}</div>
+        </div>
+        <div class="ln-more">⋯</div>
+      </div>
       <div class="ln-body" id="post-{html.escape(draft.item_id)}">{body_html}</div>
       <div class="ln-hashtags">{hashtags}</div>
 {_link_preview(draft, image_rel)}
+      <div class="ln-reactions">
+        <div class="ln-reaction-btn"><span>👍</span> Like</div>
+        <div class="ln-reaction-btn"><span>💬</span> Comment</div>
+        <div class="ln-reaction-btn"><span>🔄</span> Repost</div>
+        <div class="ln-reaction-btn"><span>✉️</span> Send</div>
+      </div>
     </div>'''
 
     return f'''
@@ -126,7 +151,7 @@ def _draft_card(draft: Draft, analysis: dict | None, image_rel: str | None) -> s
       <div class="card-meta">
         <div class="left">
           <span class="day-badge">{html.escape(plan.day_name)}</span>
-          <span class="pillar">{html.escape(draft.pillar.replace('_', ' ').title())}</span>
+          <span class="pillar">{html.escape(draft.pillar.replace("_", " ").title())}</span>
           <span class="item-id">#{html.escape(draft.item_id[:8])}</span>
         </div>
         <a class="source-link" href="{html.escape(draft.source_url)}" target="_blank" rel="noopener">Source →</a>
@@ -141,15 +166,15 @@ def _draft_card(draft: Draft, analysis: dict | None, image_rel: str | None) -> s
       <div class="quality-card">
         <div class="score-row">
           <span>Relevance</span>
-          <span class="score {_score_color(rel_score)}">{rel_score}/100 <span class="bar">{_bar(rel_score)}</span></span>
+          <span class="score {_score_color(rel_score)}">{rel_score}/100 {_progress_bar(rel_score)}</span>
         </div>
         <div class="score-row">
           <span>Accuracy</span>
-          <span class="score {_score_color(acc_score)}">{acc_score}/100 <span class="bar">{_bar(acc_score)}</span></span>
+          <span class="score {_score_color(acc_score)}">{acc_score}/100 {_progress_bar(acc_score)}</span>
         </div>
         <div class="score-row">
           <span>Perfection</span>
-          <span class="score {_score_color(perf_score)}">{perf_score}/100 <span class="bar">{_bar(perf_score)}</span></span>
+          <span class="score {_score_color(perf_score)}">{perf_score}/100 {_progress_bar(perf_score)}</span>
         </div>
         <div class="action-line">Proposed action: <strong>{html.escape(action)}</strong></div>
 {issues_html}
@@ -170,9 +195,32 @@ def _draft_card(draft: Draft, analysis: dict | None, image_rel: str | None) -> s
         </div>
       </div>
     </article>'''
+def _render_media(draft: Draft, image_rel: str | None) -> str:
+    if image_rel:
+        return f"""      <div class=\"ln-image\">
+        <img src=\"images/{html.escape(Path(image_rel).name)}\" alt=\"\" loading=\"lazy\" />
+      </div>"""
+    from urllib.parse import urlparse
+    try:
+        domain = urlparse(draft.source_url).netloc.replace("www.", "")
+    except ValueError as exc:
+        logger.warning("Could not parse source URL for link preview: %s", exc)
+        domain = "Source"
+    if not domain:
+        domain = "Source"
+    return f"""      <a class=\"ln-link-card\" href=\"{html.escape(draft.source_url)}\" target=\"_blank\" rel=\"noopener\">
+        <div class=\"ln-link-preview\">
+          <div class=\"ln-link-thumb\">🔗</div>
+          <div class=\"ln-link-info\">
+            <div class=\"ln-link-title\">{html.escape(draft.title[:90])}</div>
+            <div class=\"ln-link-domain\">{html.escape(domain)}</div>
+          </div>
+        </div>
+      </a>"""
 
 
 def _bar(score: int) -> str:
+    """Kept for backward compatibility; progress bars now use CSS."""
     filled = round(score / 10)
     empty = 10 - filled
     return "█" * filled + "░" * empty
@@ -279,22 +327,28 @@ _HTML_TEMPLATE = '''<!DOCTYPE html>
 
 _CSS = '''
 :root {{
-  --bg: #0b0d10;
-  --surface: #13161d;
-  --card: #1a1e27;
-  --line: #2a3040;
-  --txt: #f0f2f7;
-  --mut: #8b95a7;
-  --ok: #22c55e;
-  --warn: #f59e0b;
-  --bad: #ef4444;
-  --accent: #60a5fa;
+  --bg: #f3f2ef;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --line: #e0e0e0;
+  --txt: #1f1f1f;
+  --mut: #666666;
+  --ok: #057a55;
+  --warn: #b45309;
+  --bad: #b42318;
+  --accent: #0a66c2;
+  --accent-soft: #e2f0fe;
   --ln-bg: #ffffff;
   --ln-txt: #1f1f1f;
   --ln-muted: #666666;
   --ln-link: #0a66c2;
   --ln-line: #e0e0e0;
   --ln-hover: #f3f2ef;
+  --ln-name: #1f1f1f;
+  --ln-headline: #666666;
+  --ln-time: #666666;
+  --reaction: #666666;
+  --shadow: 0 1px 2px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.05);
 }}
 * {{ box-sizing: border-box; }}
 html {{ scroll-behavior: smooth; }}
@@ -306,21 +360,22 @@ body {{
   line-height: 1.5;
 }}
 .wrap {{
-  max-width: 760px;
+  max-width: 720px;
   margin: 0 auto;
   padding: 0 18px;
 }}
 .site-header {{
-  border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(96,165,250,0.08) 0%, transparent 100%);
+  border-bottom: 1px solid var(--ln-line);
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }}
 .site-header .wrap {{
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding-top: 22px;
-  padding-bottom: 22px;
+  padding-top: 18px;
+  padding-bottom: 18px;
 }}
 .brand {{
   display: flex;
@@ -328,21 +383,21 @@ body {{
   gap: 12px;
 }}
 .logo {{
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
   background: var(--accent);
-  color: #0b1020;
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
+  font-size: 20px;
 }}
 h1 {{
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: -0.3px;
+  letter-spacing: -0.2px;
 }}
 .sub {{
   color: var(--mut);
@@ -364,10 +419,11 @@ h1 {{
 }}
 .site-nav {{
   background: var(--surface);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--ln-line);
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 20;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }}
 .site-nav .wrap {{
   display: flex;
@@ -383,7 +439,7 @@ h1 {{
 }}
 .tab {{
   background: transparent;
-  border: 1px solid var(--line);
+  border: 1px solid var(--ln-line);
   color: var(--mut);
   padding: 7px 14px;
   border-radius: 999px;
@@ -391,8 +447,8 @@ h1 {{
   font-weight: 500;
 }}
 .tab.active {{
-  background: var(--card);
-  color: var(--txt);
+  background: var(--accent-soft);
+  color: var(--accent);
   border-color: var(--accent);
 }}
 .stats {{
@@ -403,10 +459,11 @@ h1 {{
   font-size: 13px;
 }}
 .stats .count {{
-  background: var(--card);
-  border: 1px solid var(--line);
+  background: var(--accent-soft);
+  color: var(--accent);
   padding: 4px 10px;
   border-radius: 999px;
+  font-weight: 600;
 }}
 .generated {{
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -414,22 +471,23 @@ h1 {{
 }}
 .draft-card {{
   background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 16px;
+  border: 1px solid var(--ln-line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
   padding: 20px;
   margin: 18px 0;
-  transition: border-color 0.15s ease, opacity 0.15s ease;
+  transition: opacity 0.2s ease;
 }}
 .draft-card.approved {{
   border-color: var(--ok);
-  opacity: 0.8;
+  opacity: 0.72;
 }}
 .card-meta {{
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
   flex-wrap: wrap;
 }}
 .card-meta .left {{
@@ -439,7 +497,7 @@ h1 {{
   flex-wrap: wrap;
 }}
 .day-badge {{
-  background: rgba(96,165,250,0.15);
+  background: var(--accent-soft);
   color: var(--accent);
   padding: 3px 10px;
   border-radius: 999px;
@@ -460,18 +518,18 @@ h1 {{
   color: var(--accent);
   font-size: 13px;
   text-decoration: none;
-  font-weight: 500;
+  font-weight: 600;
 }}
 .draft-title {{
-  font-size: 17px;
-  font-weight: 600;
-  margin: 0 0 16px;
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 14px;
   color: var(--txt);
 }}
 .preview-shell {{
   background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 14px;
+  border: 1px solid var(--ln-line);
+  border-radius: 12px;
   padding: 14px;
   margin-bottom: 16px;
 }}
@@ -481,6 +539,7 @@ h1 {{
   letter-spacing: 0.6px;
   color: var(--mut);
   margin-bottom: 10px;
+  font-weight: 600;
 }}
 .ln-post {{
   background: var(--ln-bg);
@@ -490,22 +549,64 @@ h1 {{
   max-width: 680px;
   margin: 0 auto;
   overflow: hidden;
+  box-shadow: 0 1px 1px rgba(0,0,0,0.04);
 }}
-.ln-post.minimal {{
-  padding: 16px;
+.ln-author {{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 10px;
+}}
+.ln-avatar {{
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0a66c2, #378fe9);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  flex-shrink: 0;
+}}
+.ln-author-info {{
+  flex: 1;
+  min-width: 0;
+}}
+.ln-name {{
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ln-name);
+  line-height: 1.3;
+}}
+.ln-headline {{
+  font-size: 13px;
+  color: var(--ln-headline);
+  line-height: 1.35;
+}}
+.ln-time {{
+  font-size: 12px;
+  color: var(--ln-time);
+}}
+.ln-more {{
+  margin-left: auto;
+  color: var(--ln-muted);
+  font-size: 18px;
+  line-height: 1;
 }}
 .ln-body {{
   font-size: 15px;
   line-height: 1.55;
   color: var(--ln-txt);
   white-space: pre-wrap;
-  margin-bottom: 10px;
+  padding: 0 16px 12px;
 }}
 .ln-hashtags {{
   color: var(--ln-link);
   font-size: 14px;
   font-weight: 600;
-  margin-bottom: 14px;
+  padding: 0 16px 12px;
 }}
 .ln-hashtags span {{
   margin-right: 6px;
@@ -558,10 +659,32 @@ h1 {{
   font-size: 12px;
   color: var(--ln-muted);
 }}
+.ln-reactions {{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--ln-line);
+  padding: 8px 16px;
+  color: var(--reaction);
+  font-size: 14px;
+  font-weight: 600;
+}}
+.ln-reaction-btn {{
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  justify-content: center;
+  padding: 8px 0;
+  cursor: default;
+}}
+.ln-reaction-btn span {{
+  font-size: 18px;
+}}
 .quality-card {{
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
+  background: #f9fafb;
+  border: 1px solid var(--ln-line);
+  border-radius: 10px;
   padding: 14px;
   margin-bottom: 14px;
 }}
@@ -569,16 +692,31 @@ h1 {{
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 5px 0;
+  padding: 6px 0;
   font-size: 14px;
 }}
 .score {{
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }}
-.bar {{
-  letter-spacing: 1px;
+.progress {{
+  width: 96px;
+  height: 7px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
 }}
+.progress > div {{
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}}
+.good .progress > div {{ background: var(--ok); }}
+.warn .progress > div {{ background: var(--warn); }}
+.bad .progress > div {{ background: var(--bad); }}
 .good {{ color: var(--ok); }}
 .warn {{ color: var(--warn); }}
 .bad {{ color: var(--bad); }}
@@ -601,29 +739,29 @@ h1 {{
 .btn {{
   background: var(--surface);
   color: var(--txt);
-  border: 1px solid var(--line);
+  border: 1px solid var(--ln-line);
   padding: 9px 16px;
-  border-radius: 9px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 14px;
-  font-weight: 500;
-  transition: transform 0.05s ease, opacity 0.15s ease;
+  font-weight: 600;
+  transition: transform 0.05s ease, opacity 0.15s ease, background 0.15s ease;
 }}
-.btn:hover {{ opacity: 0.85; transform: translateY(-1px); }}
-.btn.approve {{ background: rgba(34,197,94,0.15); color: var(--ok); border-color: rgba(34,197,94,0.35); }}
-.btn.edit {{ background: rgba(96,165,250,0.12); color: var(--accent); border-color: rgba(96,165,250,0.3); }}
-.btn.image {{ background: rgba(168,85,247,0.12); color: #c084fc; border-color: rgba(168,85,247,0.3); }}
-.btn.skip {{ background: rgba(239,68,68,0.1); color: var(--bad); border-color: rgba(239,68,68,0.3); }}
-.btn.save {{ background: rgba(34,197,94,0.15); color: var(--ok); border-color: rgba(34,197,94,0.35); }}
+.btn:hover {{ opacity: 0.9; transform: translateY(-1px); }}
+.btn.approve {{ background: #dcfce7; color: var(--ok); border-color: #86efac; }}
+.btn.edit {{ background: var(--accent-soft); color: var(--accent); border-color: #bfdbfe; }}
+.btn.image {{ background: #f3e8ff; color: #7e22ce; border-color: #d8b4fe; }}
+.btn.skip {{ background: #fee2e2; color: var(--bad); border-color: #fecaca; }}
+.btn.save {{ background: #dcfce7; color: var(--ok); border-color: #86efac; }}
 .btn.cancel {{ background: transparent; color: var(--mut); }}
 .edit-box {{
   margin-top: 14px;
 }}
 .edit-box textarea {{
   width: 100%;
-  background: var(--bg);
+  background: var(--surface);
   color: var(--txt);
-  border: 1px solid var(--line);
+  border: 1px solid var(--ln-line);
   border-radius: 10px;
   padding: 12px;
   font-family: inherit;
@@ -646,7 +784,7 @@ h1 {{
   margin-bottom: 12px;
 }}
 footer {{
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--ln-line);
   margin-top: 32px;
   padding: 20px 0 48px;
 }}
@@ -656,22 +794,61 @@ footer {{
 }}
 code {{
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  background: var(--surface);
+  background: #f3f2ef;
   padding: 2px 6px;
   border-radius: 5px;
+}}
+.toast-container {{
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}}
+.toast {{
+  background: var(--surface);
+  border: 1px solid var(--ln-line);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  padding: 12px 16px;
+  box-shadow: var(--shadow);
+  font-size: 14px;
+  font-weight: 500;
+  max-width: 320px;
+  animation: toastIn 0.2s ease;
+}}
+.toast.ok {{ border-left-color: var(--ok); color: var(--ok); }}
+.toast.err {{ border-left-color: var(--bad); color: var(--bad); }}
+@keyframes toastIn {{
+  from {{ opacity: 0; transform: translateX(12px); }}
+  to {{ opacity: 1; transform: translateX(0); }}
 }}
 @media (max-width: 560px) {{
   .site-header .wrap {{ flex-direction: column; align-items: flex-start; }}
   .today {{ text-align: left; }}
   .site-nav .wrap {{ flex-direction: column; align-items: flex-start; gap: 10px; }}
-  .ln-post.minimal {{ padding: 12px; }}
   .ln-body {{ font-size: 14px; }}
   .draft-card {{ padding: 16px; }}
+  .ln-reactions {{ font-size: 13px; }}
 }}
 '''
 
 
 _JS = '''
+const toastContainer = document.createElement('div');
+toastContainer.className = 'toast-container';
+document.body.appendChild(toastContainer);
+
+function showToast(message, ok=true) {{
+  const t = document.createElement('div');
+  t.className = `toast ${{ok ? 'ok' : 'err'}}`;
+  t.textContent = message;
+  toastContainer.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}}
+
 async function api(path, payload) {{
   const r = await fetch('/api' + path, {{
     method: 'POST',
@@ -686,16 +863,18 @@ async function approve(id) {{
   if (data.ok) {{
     const card = document.querySelector(`article[data-item-id="${{id}}"]`);
     card.classList.add('approved');
-    card.querySelector('.btn.approve').textContent = '✅ Approved';
+    const btn = card.querySelector('.btn.approve');
+    btn.textContent = '✅ Approved';
+    btn.disabled = true;
   }}
-  alert(data.ok ? 'Approved — ready to publish' : 'Failed: ' + (data.error || 'unknown'));
+  showToast(data.ok ? 'Approved — ready to publish' : 'Failed: ' + (data.error || 'unknown'), data.ok);
 }}
 
 async function skip(id) {{
   if (!confirm('Skip this draft? It will be moved to the skipped folder.')) return;
   const data = await api('/skip', {{item_id: id}});
   if (data.ok) document.querySelector(`article[data-item-id="${{id}}"]`).remove();
-  alert(data.ok ? 'Skipped' : 'Failed: ' + (data.error || 'unknown'));
+  showToast(data.ok ? 'Skipped' : 'Failed: ' + (data.error || 'unknown'), data.ok);
 }}
 
 function startEdit(id) {{
@@ -715,10 +894,11 @@ async function saveEdit(id) {{
   const data = await api('/edit', {{item_id: id, linkedin_post: text}});
   if (data.ok) {{
     const postEl = document.getElementById('post-' + id);
-    postEl.innerHTML = text.replace(/\n/g, '<br>');
+    postEl.innerHTML = text.replace(/
+/g, '<br>');
     cancelEdit(id);
   }}
-  alert(data.ok ? 'Saved' : 'Failed: ' + (data.error || 'unknown'));
+  showToast(data.ok ? 'Saved' : 'Failed: ' + (data.error || 'unknown'), data.ok);
 }}
 
 async function regenerateImage(id) {{
@@ -741,7 +921,7 @@ async function regenerateImage(id) {{
       else card.querySelector('.ln-post').insertAdjacentHTML('beforeend', imgHtml);
     }}
   }}
-  alert(data.ok ? 'Image regenerated' : 'Failed: ' + (data.error || 'unknown'));
+  showToast(data.ok ? 'Image regenerated' : 'Failed: ' + (data.error || 'unknown'), data.ok);
 }}
 '''
 

@@ -2,9 +2,8 @@
 
 Collects recent posts from a curated list of builder/AI Instagram accounts.
 Because Instagram requires a business/creator account id and the API returns
-media for the connected account, this collector focuses on the connected user's
-own feed as a trend signal. It can be extended to lookup other accounts if the
-connected account has the necessary permissions.
+media for the connected user's own feed as a trend signal. It can be extended
+to lookup other accounts if the connected account has the necessary permissions.
 """
 import json
 import logging
@@ -13,6 +12,7 @@ import shutil
 import subprocess  # nosec B404
 from datetime import datetime, timezone
 
+from pipeline.freshness import passes_recency_gate
 from pipeline.storage import Item, item_exists, save_item
 
 logger = logging.getLogger(__name__)
@@ -98,7 +98,8 @@ def _normalize_media(
         except (ValueError, OSError):
             logger.warning("Could not parse Instagram timestamp: %s", timestamp)
 
-    return Item(
+    item = Item(
+        id="",
         source_name=f"Instagram {account_name}",
         source_url=f"https://www.instagram.com/{account_name}/",
         item_url=permalink,
@@ -109,7 +110,14 @@ def _normalize_media(
         summary=caption[:500],
         key_claims=[caption[:240]] if caption else [],
         raw_content=caption[:3000],
+        queue_type="breaking",
+        engagement={"media_type": media_type},
     )
+    ok, reason = passes_recency_gate(item)
+    if not ok:
+        logger.info("  skipped (recency): %s — %s", item.item_title[:60], reason)
+        return None
+    return item
 
 
 def collect_instagram(
@@ -117,10 +125,10 @@ def collect_instagram(
     limit: int = 10,
     since: int | None = None,
 ) -> int:
-    print("[Instagram] fetching connected account media")
+    logger.info("[Instagram] fetching connected account media")
     user_id = _get_user_id()
     if not user_id:
-        print("  could not resolve Instagram user id")
+        logger.info("  could not resolve Instagram user id")
         return 0
 
     payload = {"ig_user_id": user_id, "limit": limit}
@@ -131,11 +139,11 @@ def collect_instagram(
         item = _normalize_media("connected_user", media, since=since)
         if not item:
             continue
-        print(f"  {item.item_title[:60]}")
+        logger.info("  %s", item.item_title[:60])
         if not dry_run:
             save_item(item)
         total += 1
-    print(f"  {total} new")
+    logger.info("  %s new", total)
     return total
 
 

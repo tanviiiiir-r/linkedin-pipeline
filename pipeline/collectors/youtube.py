@@ -10,6 +10,7 @@ import shutil
 import subprocess  # nosec B404
 from datetime import datetime, timezone
 
+from pipeline.freshness import passes_recency_gate
 from pipeline.storage import Item, item_exists, save_item
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ def _video_url(video_id: str) -> str:
 def _normalize_channel(channel_name: str, handle: str, limit: int = 3) -> list[Item]:
     channel_id = _get_channel_id(handle)
     if not channel_id:
-        print(f"  could not resolve channel {handle}")
+        logger.info("  could not resolve channel %s", handle)
         return []
 
     data = _run(
@@ -111,6 +112,7 @@ def _normalize_channel(channel_name: str, handle: str, limit: int = 3) -> list[I
 
         raw = f"{title}\n\n{description}"[:3000]
         item = Item(
+            id="",
             source_name=f"YouTube {channel_name}",
             source_url=f"https://www.youtube.com/{handle}",
             item_url=video_url,
@@ -121,7 +123,13 @@ def _normalize_channel(channel_name: str, handle: str, limit: int = 3) -> list[I
             summary=description[:500],
             key_claims=[description[:240]],
             raw_content=raw,
+            queue_type="breaking",
+            engagement={"video_id": video_id},
         )
+        ok, reason = passes_recency_gate(item)
+        if not ok:
+            logger.info("  skipped (recency): %s — %s", item.item_title[:60], reason)
+            continue
         items.append(item)
     return items
 
@@ -134,9 +142,9 @@ def collect_youtube(
     channels = channels or YOUTUBE_CHANNELS
     total = 0
     for channel_name, handle in channels:
-        print(f"[YouTube {channel_name}] {handle}")
+        logger.info("[YouTube %s] %s", channel_name, handle)
         items = _normalize_channel(channel_name, handle, limit=limit_per_channel)
-        print(f"  fetched {len(items)} new")
+        logger.info("  fetched %s new", len(items))
         if not dry_run:
             for item in items:
                 save_item(item)

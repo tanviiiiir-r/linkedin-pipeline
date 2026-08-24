@@ -158,6 +158,8 @@ def normalize_feed_entry(name: str, url: str, entry, content_type: str, dry_run:
         key_claims=extract_claims(raw),
         raw_content=raw,
         topics=topics,
+        queue_type="breaking",
+        engagement={"feed_entry_age": entry.get("published", "")},
     )
 
 
@@ -176,6 +178,11 @@ def collect_rss(name: str, url: str, content_type: str, dry_run: bool = False, l
         item = normalize_feed_entry(name, url, entry, content_type, dry_run=dry_run)
         if not item.item_url or item_exists(item.item_url):
             print(f"  dedupe: {item.item_title[:60]}")
+            continue
+        from pipeline.freshness import passes_recency_gate
+        ok, reason = passes_recency_gate(item)
+        if not ok:
+            logger.info("  skipped (recency): %s — %s", item.item_title[:60], reason)
             continue
         if recent_items and find_duplicate(item, recent_items):
             print(f"  semantic dedupe: {item.item_title[:60]}")
@@ -223,6 +230,9 @@ def collect_github_trending(language: str, dry_run: bool = False, limit: int = 1
                 summary=f"Trending {language} repository on GitHub",
                 key_claims=[f"{repo} is trending today on GitHub"],
                 raw_content=repo,
+                collected_at="2026-08-24T16:41:10.718278+00:00",
+                queue_type="breaking",
+                engagement={"is_trending": True, "language": language},
             )
             if not dry_run:
                 save_item(item)
@@ -250,18 +260,36 @@ def collect_github_search(query: str, dry_run: bool = False, limit: int = 10) ->
             if not item_url or item_exists(item_url):
                 print(f"  dedupe: {repo.get('full_name', '')}")
                 continue
+            created_at = repo.get("created_at", "")
+            stars = repo.get("stargazers_count", 0) or 0
+            stars_per_day = 0.0
+            if created_at:
+                try:
+                    dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                    repo_age_days = max(1.0, (datetime.now(timezone.utc) - dt).total_seconds() / 86400.0)
+                    stars_per_day = round(stars / repo_age_days, 2)
+                except (ValueError, OSError):
+                    pass
             item = Item(
                 id="",
                 source_name=f"GitHub Search: {query}",
                 source_url=url,
                 item_url=item_url,
                 item_title=repo.get("full_name", "Untitled"),
+                published_at=created_at,
                 source_type="github-search",
                 content_type="repo",
                 summary=repo.get("description", "") or "",
                 key_claims=[repo.get("description", "") or "New GitHub repository"],
                 raw_content=repo.get("description", "") or "",
+                queue_type="breaking",
+                engagement={"stars": stars, "stars_per_day": stars_per_day},
             )
+            from pipeline.freshness import passes_recency_gate
+            ok, reason = passes_recency_gate(item)
+            if not ok:
+                logger.info("  skipped (recency): %s — %s", item.item_title[:60], reason)
+                continue
             if not dry_run:
                 save_item(item)
             print(f"  saved: {repo.get('full_name', '')}")

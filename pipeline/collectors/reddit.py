@@ -10,6 +10,7 @@ import shutil
 import subprocess  # nosec B404
 from datetime import datetime, timezone
 
+from pipeline.freshness import passes_recency_gate
 from pipeline.storage import Item, item_exists, save_item
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,10 @@ def _post_to_item(post: dict, source_name: str) -> Item:
     if len(raw) > 4000:
         raw = raw[:4000] + "\n\n[truncated]"
 
+    published = _utc_from_timestamp(created_utc) if created_utc else datetime.now(timezone.utc).isoformat()
+    hours_old = (datetime.now(timezone.utc) - datetime.fromisoformat(published)).total_seconds() / 3600.0 if published else 0.0
+    velocity = round(score / max(1, hours_old), 2)
+
     return Item(
         id=hashlib.sha256(item_url.encode()).hexdigest()[:12],
         source_name=f"Reddit r/{subreddit}",
@@ -104,13 +109,20 @@ def _post_to_item(post: dict, source_name: str) -> Item:
         item_url=item_url,
         item_title=title,
         item_author=author,
-        published_at=_utc_from_timestamp(created_utc) if created_utc else datetime.now(timezone.utc).isoformat(),
+        published_at=published,
         source_type="reddit",
         content_type="discussion",
         summary=title,
         key_claims=key_claims,
         raw_content=raw,
         status="raw",
+        queue_type="breaking",
+        engagement={
+            "score": score,
+            "comments": num_comments,
+            "velocity": velocity,
+            "permalink": permalink,
+        },
         reddit_score=score,
         reddit_comments=num_comments,
         reddit_permalink=permalink,
@@ -126,7 +138,7 @@ def fetch_subreddit(subreddit: str, sort: str = "top", time_filter: str = "week"
     }
     resp = _execute("REDDIT_RETRIEVE_REDDIT_POST", payload)
     if not resp.get("ok"):
-        print(f"  [reddit] error fetching r/{subreddit}: {resp.get('error')}")
+        logger.warning("[reddit] error fetching r/%s: %s", subreddit, resp.get("error"))
         return []
     data = resp.get("data", {})
     if isinstance(data, dict) and "children" in data:
@@ -137,30 +149,34 @@ def fetch_subreddit(subreddit: str, sort: str = "top", time_filter: str = "week"
 
 
 def collect_reddit(dry_run: bool = False, limit_per_sub: int | None = None) -> int:
-    """Collect top posts from configured subreddits."""
+    """Collect top posts from configured subreddits, dropping stale/low-signal items."""
     if not _composio_bin():
-        print("[reddit] composio CLI not available; skipping Reddit collection")
+        logger.info("[reddit] composio CLI not available; skipping Reddit collection")
         return 0
 
     total = 0
     for subs in REDDIT_COMMUNITIES.values():
         for sub, default_limit in subs.items():
             max_results = limit_per_sub or default_limit
-            print(f"\n[Reddit r/{sub}] sort=top time=week limit={max_results}")
+            logger.info("[Reddit r/%s] sort=top time=week limit=%s", sub, max_results)
             posts = fetch_subreddit(sub, sort="top", time_filter="week", max_results=max_results)
             new = 0
             for post in posts:
                 item = _post_to_item(post, sub)
                 if item_exists(item.item_url):
-                    print(f"  dedupe: {item.item_title[:60]}")
+                    logger.info("  dedupe: %s", item.item_title[:60])
+                    continue
+                ok, reason = passes_recency_gate(item)
+                if not ok:
+                    logger.info("  skipped (recency): %s — %s", item.item_title[:60], reason)
                     continue
                 if not dry_run:
                     save_item(item)
-                print(f"  saved: {item.item_title[:60]}")
+                logger.info("  saved: %s", item.item_title[:60])
                 new += 1
-            print(f"  {new} new")
+            logger.info("  %s new", new)
             total += new
-    print(f"\nReddit collection complete: {total} new items")
+    logger.info("Reddit collection complete: %s new items", total)
     return total
 
 

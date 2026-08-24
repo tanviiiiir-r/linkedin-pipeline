@@ -17,6 +17,7 @@ dependencies = [
     "fastapi>=0.115.0",
     "sse-starlette>=2.1.0",
     "supabase>=2.7.0",
+    "pillow>=12.3.0",
 ]
 
 [project.optional-dependencies]

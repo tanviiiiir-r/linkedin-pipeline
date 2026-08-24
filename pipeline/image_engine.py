@@ -33,6 +33,58 @@ COMFY_INIT_DELAY_SECONDS = int(__import__("os").getenv("COMFY_INIT_DELAY_SECONDS
 IMAGE_DIR = DATA_DIR / "images"
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
+
+
+def _generate_placeholder(title: str, output_path: Path, width: int = 1200, height: int = 627) -> Path:
+    """Create a branded placeholder image when OG and ComfyUI both fail."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        logger.warning("Pillow not installed; cannot generate placeholder image")
+        return None
+    img = Image.new("RGB", (width, height), color="#0f172a")
+    draw = ImageDraw.Draw(img)
+    for y in range(height):
+        r = int(15 + (y / height) * 25)
+        g = int(23 + (y / height) * 30)
+        b = int(42 + (y / height) * 45)
+        draw.line([(0, y), (width, y)], fill=(r, g, b))
+    try:
+        font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
+        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 28)
+    except (OSError, ValueError):
+        font_large = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+    words = title.split()
+    lines = []
+    line = ""
+    for word in words:
+        test = f"{line} {word}".strip()
+        bbox = draw.textbbox((0, 0), test, font=font_large)
+        if bbox[2] - bbox[0] < width - 120:
+            line = test
+        else:
+            if line:
+                lines.append(line)
+            line = word
+    if line:
+        lines.append(line)
+    lines = lines[:3]
+    y_offset = height // 2 - (len(lines) * 60) // 2
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=font_large)
+        x = (width - (bbox[2] - bbox[0])) // 2
+        draw.text((x, y_offset), line, fill="#f8fafc", font=font_large)
+        y_offset += 70
+    footer = "Secure AI Engineering"
+    fbbox = draw.textbbox((0, 0), footer, font=font_small)
+    fx = (width - (fbbox[2] - fbbox[0])) // 2
+    draw.text((fx, height - 80), footer, fill="#94a3b8", font=font_small)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(output_path)
+    logger.info("Generated placeholder image: %s", output_path)
+    return output_path
+
 # Default Flux workflow extracted from the running pod metadata
 DEFAULT_FLUX_WORKFLOW = {
     "6": {
@@ -207,7 +259,12 @@ def _runpod_graphql(query: str, variables: dict | None = None) -> dict:
         timeout=30,
     )
     resp.raise_for_status()
-    return resp.json()
+    data = resp.json()
+    # Surface GraphQL-level errors for mutations so callers can act.
+    if "errors" in data and not data.get("data"):
+        messages = ", ".join(e.get("message", "") for e in data["errors"])
+        raise RuntimeError(f"RunPod GraphQL error: {messages}")
+    return data
 
 
 def pod_status() -> str:
@@ -225,7 +282,10 @@ def resume_pod() -> None:
       podResume(input: $input) { id desiredStatus }
     }
     """
-    _runpod_graphql(query, {"input": {"podId": RUNPOD_POD_ID}})
+    data = _runpod_graphql(query, {"input": {"podId": RUNPOD_POD_ID}})
+    if data.get("errors"):
+        messages = ", ".join(e.get("message", "") for e in data["errors"])
+        raise RuntimeError(f"RunPod resume failed: {messages}")
 
 
 def stop_pod() -> None:
@@ -396,9 +456,13 @@ def image_for_post(
         return result
     except (requests.exceptions.RequestException, OSError, RuntimeError):
         logger.exception("ComfyUI generation failed")
-        return None
     finally:
         _schedule_stop()
+
+    # 3. Final fallback: branded placeholder so every draft has an image
+    logger.warning("Falling back to placeholder image for %s", title)
+    placeholder = _generate_placeholder(title, output_path, width=width, height=height)
+    return placeholder
 
 
 if __name__ == "__main__":

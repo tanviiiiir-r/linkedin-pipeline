@@ -180,6 +180,7 @@ source_url: {draft.source_url}
 created_at: {draft.created_at}
 approved: {draft.approved}
 published: {draft.published}
+image_path: {draft.image_path}
 hashtags: {', '.join(draft.hashtags)}
 ---
 
@@ -258,6 +259,7 @@ def _parse_draft_markdown(text: str) -> Draft | None:
         created_at=data.get("created_at", ""),
         approved=data.get("approved", "false").lower() == "true",
         published=data.get("published", "false").lower() == "true",
+        image_path=data.get("image_path", ""),
         linkedin_post=sections.get("LinkedIn Post", ""),
         newsletter_section=sections.get("Newsletter Section", ""),
         short_pill=sections.get("Short Pill", ""),

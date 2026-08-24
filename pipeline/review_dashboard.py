@@ -278,7 +278,7 @@ _HTML_TEMPLATE = '''<!DOCTYPE html>
 
 
 _CSS = '''
-:root {{
+:root {
   --bg: #0b0d10;
   --surface: #13161d;
   --card: #1a1e27;
@@ -295,39 +295,39 @@ _CSS = '''
   --ln-link: #0a66c2;
   --ln-line: #e0e0e0;
   --ln-hover: #f3f2ef;
-}}
-* {{ box-sizing: border-box; }}
-html {{ scroll-behavior: smooth; }}
-body {{
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background: var(--bg);
   color: var(--txt);
   line-height: 1.5;
-}}
-.wrap {{
+}
+.wrap {
   max-width: 760px;
   margin: 0 auto;
   padding: 0 18px;
-}}
-.site-header {{
+}
+.site-header {
   border-bottom: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(96,165,250,0.08) 0%, transparent 100%);
-}}
-.site-header .wrap {{
+}
+.site-header .wrap {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   padding-top: 22px;
   padding-bottom: 22px;
-}}
-.brand {{
+}
+.brand {
   display: flex;
   align-items: center;
   gap: 12px;
-}}
-.logo {{
+}
+.logo {
   width: 44px;
   height: 44px;
   border-radius: 12px;
@@ -337,51 +337,51 @@ body {{
   align-items: center;
   justify-content: center;
   font-size: 22px;
-}}
-h1 {{
+}
+h1 {
   margin: 0;
   font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.3px;
-}}
-.sub {{
+}
+.sub {
   color: var(--mut);
   font-size: 13px;
   margin-top: 2px;
-}}
-.today {{
+}
+.today {
   text-align: right;
-}}
-.today .day {{
+}
+.today .day {
   font-size: 14px;
   font-weight: 600;
   color: var(--accent);
-}}
-.today .pillar {{
+}
+.today .pillar {
   font-size: 13px;
   color: var(--mut);
   text-transform: capitalize;
-}}
-.site-nav {{
+}
+.site-nav {
   background: var(--surface);
   border-bottom: 1px solid var(--line);
   position: sticky;
   top: 0;
   z-index: 10;
-}}
-.site-nav .wrap {{
+}
+.site-nav .wrap {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   padding-top: 10px;
   padding-bottom: 10px;
-}}
-.tabs {{
+}
+.tabs {
   display: flex;
   gap: 8px;
-}}
-.tab {{
+}
+.tab {
   background: transparent;
   border: 1px solid var(--line);
   color: var(--mut);
@@ -389,100 +389,100 @@ h1 {{
   border-radius: 999px;
   font-size: 13px;
   font-weight: 500;
-}}
-.tab.active {{
+}
+.tab.active {
   background: var(--card);
   color: var(--txt);
   border-color: var(--accent);
-}}
-.stats {{
+}
+.stats {
   display: flex;
   align-items: center;
   gap: 16px;
   color: var(--mut);
   font-size: 13px;
-}}
-.stats .count {{
+}
+.stats .count {
   background: var(--card);
   border: 1px solid var(--line);
   padding: 4px 10px;
   border-radius: 999px;
-}}
-.generated {{
+}
+.generated {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-}}
-.draft-card {{
+}
+.draft-card {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 20px;
   margin: 18px 0;
   transition: border-color 0.15s ease, opacity 0.15s ease;
-}}
-.draft-card.approved {{
+}
+.draft-card.approved {
   border-color: var(--ok);
   opacity: 0.8;
-}}
-.card-meta {{
+}
+.card-meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
   flex-wrap: wrap;
-}}
-.card-meta .left {{
+}
+.card-meta .left {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}}
-.day-badge {{
+}
+.day-badge {
   background: rgba(96,165,250,0.15);
   color: var(--accent);
   padding: 3px 10px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
-}}
-.pillar {{
+}
+.pillar {
   color: var(--mut);
   font-size: 13px;
   text-transform: capitalize;
-}}
-.item-id {{
+}
+.item-id {
   color: var(--mut);
   font-size: 12px;
   font-family: ui-monospace, monospace;
-}}
-.source-link {{
+}
+.source-link {
   color: var(--accent);
   font-size: 13px;
   text-decoration: none;
   font-weight: 500;
-}}
-.draft-title {{
+}
+.draft-title {
   font-size: 17px;
   font-weight: 600;
   margin: 0 0 16px;
   color: var(--txt);
-}}
-.preview-shell {{
+}
+.preview-shell {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 14px;
   margin-bottom: 16px;
-}}
-.preview-label {{
+}
+.preview-label {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.6px;
   color: var(--mut);
   margin-bottom: 10px;
-}}
-.ln-post {{
+}
+.ln-post {
   background: var(--ln-bg);
   color: var(--ln-txt);
   border: 1px solid var(--ln-line);
@@ -490,49 +490,49 @@ h1 {{
   max-width: 680px;
   margin: 0 auto;
   overflow: hidden;
-}}
-.ln-post.minimal {{
+}
+.ln-post.minimal {
   padding: 16px;
-}}
-.ln-body {{
+}
+.ln-body {
   font-size: 15px;
   line-height: 1.55;
   color: var(--ln-txt);
   white-space: pre-wrap;
   margin-bottom: 10px;
-}}
-.ln-hashtags {{
+}
+.ln-hashtags {
   color: var(--ln-link);
   font-size: 14px;
   font-weight: 600;
   margin-bottom: 14px;
-}}
-.ln-hashtags span {{
+}
+.ln-hashtags span {
   margin-right: 6px;
-}}
-.ln-image {{
+}
+.ln-image {
   border-top: 1px solid var(--ln-line);
   width: 100%;
   aspect-ratio: 1.91 / 1;
   background: #f3f2ef;
   overflow: hidden;
-}}
-.ln-image img {{
+}
+.ln-image img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
-}}
-.ln-link-card {{
+}
+.ln-link-card {
   display: block;
   border-top: 1px solid var(--ln-line);
   text-decoration: none;
   color: inherit;
-}}
-.ln-link-card:hover {{
+}
+.ln-link-card:hover {
   background: var(--ln-hover);
-}}
-.ln-link-placeholder {{
+}
+.ln-link-placeholder {
   min-height: 140px;
   background: #f3f2ef;
   display: flex;
@@ -542,63 +542,63 @@ h1 {{
   gap: 8px;
   text-align: center;
   padding: 20px;
-}}
-.ln-link-icon {{
+}
+.ln-link-icon {
   font-size: 28px;
-}}
-.ln-link-title {{
+}
+.ln-link-title {
   font-size: 15px;
   font-weight: 600;
   color: var(--ln-txt);
   max-width: 90%;
-}}
-.ln-link-domain {{
+}
+.ln-link-domain {
   border-top: 1px solid var(--ln-line);
   padding: 10px 16px;
   font-size: 12px;
   color: var(--ln-muted);
-}}
-.quality-card {{
+}
+.quality-card {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 14px;
   margin-bottom: 14px;
-}}
-.score-row {{
+}
+.score-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 5px 0;
   font-size: 14px;
-}}
-.score {{
+}
+.score {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
-}}
-.bar {{
+}
+.bar {
   letter-spacing: 1px;
-}}
-.good {{ color: var(--ok); }}
-.warn {{ color: var(--warn); }}
-.bad {{ color: var(--bad); }}
-.action-line {{
+}
+.good { color: var(--ok); }
+.warn { color: var(--warn); }
+.bad { color: var(--bad); }
+.action-line {
   margin-top: 10px;
   font-size: 13px;
   color: var(--mut);
-}}
-.issues {{
+}
+.issues {
   margin: 10px 0 0 18px;
   padding: 0;
   font-size: 13px;
   color: var(--warn);
-}}
-.actions {{
+}
+.actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}}
-.btn {{
+}
+.btn {
   background: var(--surface);
   color: var(--txt);
   border: 1px solid var(--line);
@@ -608,18 +608,18 @@ h1 {{
   font-size: 14px;
   font-weight: 500;
   transition: transform 0.05s ease, opacity 0.15s ease;
-}}
-.btn:hover {{ opacity: 0.85; transform: translateY(-1px); }}
-.btn.approve {{ background: rgba(34,197,94,0.15); color: var(--ok); border-color: rgba(34,197,94,0.35); }}
-.btn.edit {{ background: rgba(96,165,250,0.12); color: var(--accent); border-color: rgba(96,165,250,0.3); }}
-.btn.image {{ background: rgba(168,85,247,0.12); color: #c084fc; border-color: rgba(168,85,247,0.3); }}
-.btn.skip {{ background: rgba(239,68,68,0.1); color: var(--bad); border-color: rgba(239,68,68,0.3); }}
-.btn.save {{ background: rgba(34,197,94,0.15); color: var(--ok); border-color: rgba(34,197,94,0.35); }}
-.btn.cancel {{ background: transparent; color: var(--mut); }}
-.edit-box {{
+}
+.btn:hover { opacity: 0.85; transform: translateY(-1px); }
+.btn.approve { background: rgba(34,197,94,0.15); color: var(--ok); border-color: rgba(34,197,94,0.35); }
+.btn.edit { background: rgba(96,165,250,0.12); color: var(--accent); border-color: rgba(96,165,250,0.3); }
+.btn.image { background: rgba(168,85,247,0.12); color: #c084fc; border-color: rgba(168,85,247,0.3); }
+.btn.skip { background: rgba(239,68,68,0.1); color: var(--bad); border-color: rgba(239,68,68,0.3); }
+.btn.save { background: rgba(34,197,94,0.15); color: var(--ok); border-color: rgba(34,197,94,0.35); }
+.btn.cancel { background: transparent; color: var(--mut); }
+.edit-box {
   margin-top: 14px;
-}}
-.edit-box textarea {{
+}
+.edit-box textarea {
   width: 100%;
   background: var(--bg);
   color: var(--txt);
@@ -630,119 +630,119 @@ h1 {{
   font-size: 15px;
   line-height: 1.5;
   resize: vertical;
-}}
-.edit-actions {{
+}
+.edit-actions {
   display: flex;
   gap: 8px;
   margin-top: 8px;
-}}
-.empty {{
+}
+.empty {
   text-align: center;
   padding: 60px 20px;
   color: var(--mut);
-}}
-.empty-icon {{
+}
+.empty-icon {
   font-size: 48px;
   margin-bottom: 12px;
-}}
-footer {{
+}
+footer {
   border-top: 1px solid var(--line);
   margin-top: 32px;
   padding: 20px 0 48px;
-}}
-.note {{
+}
+.note {
   color: var(--mut);
   font-size: 13px;
-}}
-code {{
+}
+code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   background: var(--surface);
   padding: 2px 6px;
   border-radius: 5px;
-}}
-@media (max-width: 560px) {{
-  .site-header .wrap {{ flex-direction: column; align-items: flex-start; }}
-  .today {{ text-align: left; }}
-  .site-nav .wrap {{ flex-direction: column; align-items: flex-start; gap: 10px; }}
-  .ln-post.minimal {{ padding: 12px; }}
-  .ln-body {{ font-size: 14px; }}
-  .draft-card {{ padding: 16px; }}
-}}
+}
+@media (max-width: 560px) {
+  .site-header .wrap { flex-direction: column; align-items: flex-start; }
+  .today { text-align: left; }
+  .site-nav .wrap { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .ln-post.minimal { padding: 12px; }
+  .ln-body { font-size: 14px; }
+  .draft-card { padding: 16px; }
+}
 '''
 
 
 _JS = '''
-async function api(path, payload) {{
-  const r = await fetch('/api' + path, {{
+async function api(path, payload) {
+  const r = await fetch('/api' + path, {
     method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
+    headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(payload)
-  }});
+  });
   return r.json();
-}}
+}
 
-async function approve(id) {{
-  const data = await api('/approve', {{item_id: id}});
-  if (data.ok) {{
-    const card = document.querySelector(`article[data-item-id="${{id}}"]`);
+async function approve(id) {
+  const data = await api('/approve', {item_id: id});
+  if (data.ok) {
+    const card = document.querySelector(`article[data-item-id="${id}"]`);
     card.classList.add('approved');
     card.querySelector('.btn.approve').textContent = '✅ Approved';
-  }}
+  }
   alert(data.ok ? 'Approved — ready to publish' : 'Failed: ' + (data.error || 'unknown'));
-}}
+}
 
-async function skip(id) {{
+async function skip(id) {
   if (!confirm('Skip this draft? It will be moved to the skipped folder.')) return;
-  const data = await api('/skip', {{item_id: id}});
-  if (data.ok) document.querySelector(`article[data-item-id="${{id}}"]`).remove();
+  const data = await api('/skip', {item_id: id});
+  if (data.ok) document.querySelector(`article[data-item-id="${id}"]`).remove();
   alert(data.ok ? 'Skipped' : 'Failed: ' + (data.error || 'unknown'));
-}}
+}
 
-function startEdit(id) {{
+function startEdit(id) {
   document.getElementById('edit-' + id).style.display = 'block';
-  const preview = document.querySelector(`article[data-item-id="${{id}}"] .preview-shell`);
+  const preview = document.querySelector(`article[data-item-id="${id}"] .preview-shell`);
   if (preview) preview.style.display = 'none';
-}}
+}
 
-function cancelEdit(id) {{
+function cancelEdit(id) {
   document.getElementById('edit-' + id).style.display = 'none';
-  const preview = document.querySelector(`article[data-item-id="${{id}}"] .preview-shell`);
+  const preview = document.querySelector(`article[data-item-id="${id}"] .preview-shell`);
   if (preview) preview.style.display = 'block';
-}}
+}
 
-async function saveEdit(id) {{
+async function saveEdit(id) {
   const text = document.getElementById('textarea-' + id).value;
-  const data = await api('/edit', {{item_id: id, linkedin_post: text}});
-  if (data.ok) {{
+  const data = await api('/edit', {item_id: id, linkedin_post: text});
+  if (data.ok) {
     const postEl = document.getElementById('post-' + id);
     postEl.innerHTML = text.replace(/\n/g, '<br>');
     cancelEdit(id);
-  }}
+  }
   alert(data.ok ? 'Saved' : 'Failed: ' + (data.error || 'unknown'));
-}}
+}
 
-async function regenerateImage(id) {{
+async function regenerateImage(id) {
   if (!confirm('This may wake and run your RunPod ComfyUI pod. Continue?')) return;
   const btn = event.target;
   btn.disabled = true;
   const originalText = btn.textContent;
   btn.textContent = '🔄 Running…';
-  const data = await api('/regenerate-image', {{item_id: id}});
+  const data = await api('/regenerate-image', {item_id: id});
   btn.disabled = false;
   btn.textContent = originalText;
-  if (data.ok && data.image_url) {{
-    const card = document.querySelector(`article[data-item-id="${{id}}"]`);
+  if (data.ok && data.image_url) {
+    const card = document.querySelector(`article[data-item-id="${id}"]`);
     let box = card.querySelector('.ln-image');
-    const imgHtml = `<div class="ln-image"><img src="${{data.image_url}}" alt="" /></div>`;
+    const imgHtml = `<div class="ln-image"><img src="${data.image_url}" alt="" /></div>`;
     if (box) box.outerHTML = imgHtml;
-    else {{
+    else {
       const hashtags = card.querySelector('.ln-hashtags');
       if (hashtags) hashtags.insertAdjacentHTML('afterend', imgHtml);
       else card.querySelector('.ln-post').insertAdjacentHTML('beforeend', imgHtml);
-    }}
-  }}
+    }
+  }
   alert(data.ok ? 'Image regenerated' : 'Failed: ' + (data.error || 'unknown'));
-}}
+}
 '''
 
 

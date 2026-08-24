@@ -9,7 +9,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from config.settings import DB_PATH, RAW_DIR, ensure_dirs
+from config.settings import DB_PATH, PLANNED_DIR, RAW_DIR, ensure_dirs
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,9 @@ class Item(BaseModel):
     status: str = "raw"
     signal_strength: str = "auto"
     url_hash: str = ""
+    queue_type: str = "breaking"  # breaking | planned | manual
+    expires_at: str = ""
+    engagement: dict = Field(default_factory=dict)
     reddit_score: int = 0
     reddit_comments: int = 0
     reddit_permalink: str = ""
@@ -59,7 +62,7 @@ def url_hash(url: str) -> str:
     return hashlib.sha256(url.encode()).hexdigest()[:12]
 
 
-_ALLOWED_INDEX_COLUMNS = {"collected_at", "status", "source_name"}
+_ALLOWED_INDEX_COLUMNS = {"collected_at", "status", "source_name", "queue_type"}
 
 
 def _connection() -> sqlite3.Connection:
@@ -92,17 +95,27 @@ def init_db() -> None:
             topics TEXT,
             status TEXT DEFAULT 'raw',
             signal_strength TEXT,
-            url_hash TEXT NOT NULL
+            url_hash TEXT NOT NULL,
+            queue_type TEXT DEFAULT 'breaking',
+            expires_at TEXT,
+            engagement TEXT
         )
         """
     )
+    # Migration: ensure image_path column exists on older databases
+    for col, dtype in (
+        ("image_path", "TEXT DEFAULT ''"),
+        ("queue_type", "TEXT DEFAULT 'breaking'"),
+        ("expires_at", "TEXT"),
+        ("engagement", "TEXT"),
+    ):
+        try:
+            conn.execute(f"ALTER TABLE items ADD COLUMN {col} {dtype}")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+    # Create indexes after all columns are guaranteed to exist
     for idx in _ALLOWED_INDEX_COLUMNS:
         conn.execute(f"CREATE INDEX IF NOT EXISTS idx_items_{idx} ON items({idx})")
-    # Migration: ensure image_path column exists on older databases
-    try:
-        conn.execute("ALTER TABLE items ADD COLUMN image_path TEXT DEFAULT ''")
-    except sqlite3.OperationalError:
-        pass  # column already exists
     conn.commit()
     conn.close()
 
@@ -123,19 +136,15 @@ def item_exists(url: str) -> bool:
         return sb.item_exists(url)
     h = url_hash(url)
     conn = _connection()
-    cur = conn.execute("SELECT 1 FROM items WHERE item_url = ? OR url_hash = ?", (url, h))
-    exists = cur.fetchone() is not None
+    row = conn.execute(
+        "SELECT 1 FROM items WHERE item_url = ? OR url_hash = ?", (url, h)
+    ).fetchone()
     conn.close()
-    return exists
+    return row is not None
 
 
 def save_item(item: Item) -> Path:
-    """Persist item to Supabase (if configured) and local markdown/SQLite."""
-    if item_exists(item.item_url):
-        logger.debug("Skipping save for existing item: %s", item.item_url)
-        # Mirror would have been written at original save time; return a stable path.
-        today = item.collected_at[:10] if item.collected_at else datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        return RAW_DIR / today / _slugify(item.source_name) / f"{item.id}--{_slugify(item.item_title)}.md"
+    """Persist an item to SQLite + markdown mirror."""
     sb = _supabase_storage()
     if sb:
         return sb.save_item(item)
@@ -163,6 +172,9 @@ def save_item(item: Item) -> Path:
         "status": item.status,
         "signal_strength": item.signal_strength,
         "url_hash": item.url_hash,
+        "queue_type": item.queue_type,
+        "expires_at": item.expires_at,
+        "engagement": item.engagement,
         "pillar_candidates": item.pillar_candidates,
         "topics": item.topics,
     }
@@ -188,22 +200,27 @@ def save_item(item: Item) -> Path:
         """
         INSERT INTO items (id, source_name, source_url, item_url, item_title, item_author,
             published_at, collected_at, source_type, content_type, summary, key_claims,
-            raw_content, pillar_candidates, topics, status, signal_strength, url_hash, image_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            raw_content, pillar_candidates, topics, status, signal_strength, url_hash,
+            image_path, queue_type, expires_at, engagement)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(item_url) DO UPDATE SET
             collected_at=excluded.collected_at,
             status=excluded.status,
             summary=excluded.summary,
             key_claims=excluded.key_claims,
             raw_content=excluded.raw_content,
-            image_path=excluded.image_path
+            image_path=excluded.image_path,
+            queue_type=excluded.queue_type,
+            expires_at=excluded.expires_at,
+            engagement=excluded.engagement
         """,
         (
             item.id, item.source_name, item.source_url, item.item_url, item.item_title,
             item.item_author, item.published_at, item.collected_at, item.source_type,
             item.content_type, item.summary, json.dumps(item.key_claims), item.raw_content,
             json.dumps(item.pillar_candidates), json.dumps(item.topics), item.status,
-            item.signal_strength, item.url_hash, item.image_path,
+            item.signal_strength, item.url_hash, item.image_path, item.queue_type,
+            item.expires_at, json.dumps(item.engagement),
         ),
     )
     conn.commit()
@@ -228,21 +245,28 @@ def load_item(url: str) -> Item | None:
     return _item_from_row(row)
 
 
-def list_items(status: str | None = None, limit: int = 100) -> list[Item]:
+def list_items(
+    status: str | None = None,
+    limit: int = 100,
+    queue_type: str | None = None,
+) -> list[Item]:
     sb = _supabase_storage()
     if sb:
         rows = sb.list_items(status=status, limit=limit)
         return [_item_from_row({k: row.get(k) for k in row}) for row in rows]
     conn = _connection()
+    where_clauses: list[str] = []
+    params: list = []
     if status:
-        rows = conn.execute(
-            "SELECT * FROM items WHERE status = ? ORDER BY collected_at DESC LIMIT ?",
-            (status, limit),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM items ORDER BY collected_at DESC LIMIT ?", (limit,)
-        ).fetchall()
+        where_clauses.append("status = ?")
+        params.append(status)
+    if queue_type:
+        where_clauses.append("queue_type = ?")
+        params.append(queue_type)
+    where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    sql = f"SELECT * FROM items {where} ORDER BY collected_at DESC LIMIT ?"
+    params.append(limit)
+    rows = conn.execute(sql, params).fetchall()
     conn.close()
     return [_item_from_row(row) for row in rows]
 
@@ -274,13 +298,22 @@ def _item_from_row(row) -> Item:
     for key in keys:
         value = row[key]
         if value is None:
-            data[key] = [] if key in ("key_claims", "pillar_candidates", "topics") else "" if key in ("reddit_permalink",) else 0 if key in ("reddit_score", "reddit_comments") else value
+            if key in ("key_claims", "pillar_candidates", "topics"):
+                data[key] = []
+            elif key in ("reddit_permalink", "published_at", "collected_at", "expires_at"):
+                data[key] = ""
+            elif key in ("reddit_score", "reddit_comments"):
+                data[key] = 0
+            elif key == "engagement":
+                data[key] = {}
+            else:
+                data[key] = value
             continue
-        if key in ("key_claims", "pillar_candidates", "topics"):
+        if key in ("key_claims", "pillar_candidates", "topics", "engagement"):
             try:
                 data[key] = json.loads(value)
             except (json.JSONDecodeError, TypeError):
-                data[key] = []
+                data[key] = [] if key != "engagement" else {}
         elif key in ("reddit_score", "reddit_comments"):
             try:
                 data[key] = int(value)
@@ -300,3 +333,54 @@ def _json_loads(key: str, value):
         except json.JSONDecodeError:
             return []
     return value
+
+
+def save_planned_item(item: Item) -> Path:
+    """Save a planned evergreen item to a separate markdown queue."""
+    ensure_dirs()
+    PLANNED_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"{item.expires_at or 'no-expiry'}--{item.id}--{item.pillar_candidates[0] if item.pillar_candidates else 'planned'}.md"
+    path = PLANNED_DIR / filename
+    path.write_text(_planned_markdown(item))
+    return path
+
+
+def load_planned_items(limit: int = 100) -> list[Item]:
+    """Load planned evergreen items from markdown files."""
+    ensure_dirs()
+    items: list[Item] = []
+    if not PLANNED_DIR.exists():
+        return items
+    for path in sorted(PLANNED_DIR.glob("*.md"), reverse=True)[:limit]:
+        try:
+            item = _parse_planned_markdown(path.read_text())
+            if item:
+                items.append(item)
+        except OSError:
+            logger.warning("Skipping unreadable planned item %s", path)
+    return items
+
+
+def _planned_markdown(item: Item) -> str:
+    data = item.model_dump()
+    return f"""---
+{json.dumps(data, indent=2, default=str)}
+---
+
+## Summary
+{item.summary}
+
+## Raw Content
+{item.raw_content}
+"""
+
+
+def _parse_planned_markdown(text: str) -> Item | None:
+    try:
+        fm = text.split("---", 2)[1]
+        data = json.loads(fm.strip())
+        data.setdefault("queue_type", "planned")
+        return Item(**data)
+    except (ValueError, json.JSONDecodeError, TypeError):
+        logger.warning("Failed to parse planned item markdown")
+        return None

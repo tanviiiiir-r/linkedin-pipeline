@@ -8,13 +8,11 @@ from __future__ import annotations
 import html
 import logging
 import shutil
-from datetime import datetime, timezone
 from pathlib import Path
 
 from config.calendar import day_plan
 from config.settings import QUEUE_DIR, REVIEW_DIR, ensure_dirs
 from pipeline.approval import list_pending
-from pipeline.content_analyst import analyze_queued_items
 from pipeline.drafting import Draft
 
 logger = logging.getLogger(__name__)
@@ -194,36 +192,31 @@ def generate_dashboard() -> Path:
     REVIEW_SKIPPED_DIR.mkdir(parents=True, exist_ok=True)
 
     pending = list_pending()
-    analysis_results = analyze_queued_items(limit=50) if pending else []
-    analysis_by_id = {r.item_id: r for r in analysis_results}
-
-    cards: list[str] = []
+    # Copy active images and candidate images into review/images for the dashboard
     for draft in pending:
-        analysis = analysis_by_id.get(draft.item_id)
-        analysis_dict = None
-        if analysis:
-            analysis_dict = {
-                "relevance_score": analysis.relevance_score,
-                "accuracy_score": analysis.accuracy_score,
-                "perfection_score": analysis.perfection_score,
-                "issues": analysis.issues,
-                "proposed_action": analysis.proposed_action,
-            }
-        image_rel = _copy_image_for_review(draft.image_path, draft.item_id)
-        cards.append(_draft_card(draft, analysis_dict, image_rel))
+        _copy_image_for_review(draft.image_path, draft.item_id)
+        for cand in draft.image_candidates or []:
+            cand_path = Path(cand)
+            if not cand_path.exists():
+                continue
+            try:
+                rel = cand_path.relative_to(REVIEW_DIR)
+                dest = REVIEW_IMAGES_DIR / rel.name
+            except ValueError:
+                ext = cand_path.suffix or ".jpg"
+                dest = REVIEW_IMAGES_DIR / f"{draft.item_id}_cand_{len(list(REVIEW_IMAGES_DIR.glob(f'{draft.item_id}*')))}{ext}"
+            try:
+                shutil.copy2(cand_path, dest)
+            except OSError:
+                logger.exception("Failed to copy candidate image %s", cand_path)
 
-    body = "\n".join(cards) if cards else _empty_state()
     plan = day_plan()
-
     index_path = REVIEW_DIR / "index.html"
     index_path.write_text(_HTML_TEMPLATE.format(
-        generated_at=datetime.now(timezone.utc).isoformat(),
-        count=len(cards),
         day=html.escape(plan.day_name),
         pillar=html.escape(plan.post_type.replace('_', ' ').title()),
-        body=body,
     ))
-    logger.info("Review dashboard generated: %s (%s drafts)", index_path, len(cards))
+    logger.info("Review dashboard generated: %s (%s drafts)", index_path, len(pending))
     return index_path
 
 
@@ -248,24 +241,13 @@ _HTML_TEMPLATE = '''<!DOCTYPE html>
       <div class="today">
         <div class="day">{day}</div>
         <div class="pillar">{pillar}</div>
+        <div class="counter" id="counter">0 / 0</div>
       </div>
     </div>
   </header>
 
-  <nav class="site-nav">
-    <div class="wrap">
-      <div class="tabs">
-        <button class="tab active" disabled>LinkedIn</button>
-      </div>
-      <div class="stats">
-        <span class="count">{count} pending</span>
-        <span class="generated">Generated {generated_at}</span>
-      </div>
-    </div>
-  </nav>
-
-  <main class="wrap">
-{body}
+  <main class="wrap" id="app">
+    <div class="loading">Loading drafts…</div>
   </main>
 
   <footer class="wrap">
@@ -306,7 +288,7 @@ body {
   line-height: 1.5;
 }
 .wrap {
-  max-width: 760px;
+  max-width: 860px;
   margin: 0 auto;
   padding: 0 18px;
 }
@@ -322,291 +304,107 @@ body {
   padding-top: 22px;
   padding-bottom: 22px;
 }
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
+.brand { display: flex; align-items: center; gap: 12px; }
 .logo {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: var(--accent);
-  color: #0b1020;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 44px; height: 44px; border-radius: 12px; background: var(--accent);
+  color: #0b1020; display: flex; align-items: center; justify-content: center;
   font-size: 22px;
 }
-h1 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.3px;
+h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+.sub { color: var(--mut); font-size: 13px; margin-top: 2px; }
+.today { text-align: right; }
+.today .day { font-size: 14px; font-weight: 600; color: var(--accent); }
+.today .pillar { font-size: 13px; color: var(--mut); text-transform: capitalize; }
+.counter { font-size: 12px; color: var(--mut); margin-top: 4px; }
+.loading { text-align: center; padding: 80px 20px; color: var(--mut); }
+.empty { text-align: center; padding: 80px 20px; color: var(--mut); }
+.empty-icon { font-size: 48px; margin-bottom: 12px; }
+
+/* Draft navigator */
+.nav-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; margin: 18px 0;
 }
-.sub {
-  color: var(--mut);
-  font-size: 13px;
-  margin-top: 2px;
+.nav-bar button {
+  background: var(--surface); color: var(--txt); border: 1px solid var(--line);
+  padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px;
 }
-.today {
-  text-align: right;
-}
-.today .day {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--accent);
-}
-.today .pillar {
-  font-size: 13px;
-  color: var(--mut);
-  text-transform: capitalize;
-}
-.site-nav {
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-.site-nav .wrap {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding-top: 10px;
-  padding-bottom: 10px;
-}
-.tabs {
-  display: flex;
-  gap: 8px;
-}
-.tab {
-  background: transparent;
-  border: 1px solid var(--line);
-  color: var(--mut);
-  padding: 7px 14px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 500;
-}
-.tab.active {
-  background: var(--card);
-  color: var(--txt);
-  border-color: var(--accent);
-}
-.stats {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  color: var(--mut);
-  font-size: 13px;
-}
-.stats .count {
-  background: var(--card);
-  border: 1px solid var(--line);
-  padding: 4px 10px;
-  border-radius: 999px;
-}
-.generated {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-}
+.nav-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Draft card */
 .draft-card {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 20px;
-  margin: 18px 0;
-  transition: border-color 0.15s ease, opacity 0.15s ease;
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+  padding: 20px; margin: 18px 0;
 }
-.draft-card.approved {
-  border-color: var(--ok);
-  opacity: 0.8;
-}
+.draft-card.approved { border-color: var(--ok); opacity: 0.8; }
+.draft-card.rejected { border-color: var(--bad); opacity: 0.7; }
 .card-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 12px; flex-wrap: wrap;
 }
-.card-meta .left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
+.card-meta .left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .day-badge {
-  background: rgba(96,165,250,0.15);
-  color: var(--accent);
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
+  background: rgba(96,165,250,0.15); color: var(--accent);
+  padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
 }
-.pillar {
-  color: var(--mut);
-  font-size: 13px;
-  text-transform: capitalize;
-}
-.item-id {
-  color: var(--mut);
-  font-size: 12px;
-  font-family: ui-monospace, monospace;
-}
-.source-link {
-  color: var(--accent);
-  font-size: 13px;
-  text-decoration: none;
-  font-weight: 500;
-}
-.draft-title {
-  font-size: 17px;
-  font-weight: 600;
-  margin: 0 0 16px;
-  color: var(--txt);
-}
+.pillar { color: var(--mut); font-size: 13px; text-transform: capitalize; }
+.item-id { color: var(--mut); font-size: 12px; font-family: ui-monospace, monospace; }
+.source-link { color: var(--accent); font-size: 13px; text-decoration: none; font-weight: 500; }
+.draft-title { font-size: 19px; font-weight: 600; margin: 0 0 16px; color: var(--txt); }
+
+/* LinkedIn preview */
 .preview-shell {
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 14px;
-  margin-bottom: 16px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 14px;
+  padding: 14px; margin-bottom: 16px;
 }
-.preview-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--mut);
-  margin-bottom: 10px;
-}
+.preview-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--mut); margin-bottom: 10px; }
 .ln-post {
-  background: var(--ln-bg);
-  color: var(--ln-txt);
-  border: 1px solid var(--ln-line);
-  border-radius: 10px;
-  max-width: 680px;
-  margin: 0 auto;
-  overflow: hidden;
+  background: var(--ln-bg); color: var(--ln-txt); border: 1px solid var(--ln-line);
+  border-radius: 10px; max-width: 680px; margin: 0 auto; overflow: hidden;
 }
-.ln-post.minimal {
-  padding: 16px;
-}
-.ln-body {
-  font-size: 15px;
-  line-height: 1.55;
-  color: var(--ln-txt);
-  white-space: pre-wrap;
-  margin-bottom: 10px;
-}
-.ln-hashtags {
-  color: var(--ln-link);
-  font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 14px;
-}
-.ln-hashtags span {
-  margin-right: 6px;
-}
+.ln-post.minimal { padding: 16px; }
+.ln-body { font-size: 15px; line-height: 1.55; color: var(--ln-txt); white-space: pre-wrap; margin-bottom: 10px; }
+.ln-hashtags { color: var(--ln-link); font-size: 14px; font-weight: 600; margin-bottom: 14px; }
+.ln-hashtags span { margin-right: 6px; }
 .ln-image {
-  border-top: 1px solid var(--ln-line);
-  width: 100%;
-  aspect-ratio: 1.91 / 1;
-  background: #f3f2ef;
-  overflow: hidden;
+  border-top: 1px solid var(--ln-line); width: 100%;
+  aspect-ratio: 1.91 / 1; background: #f3f2ef; overflow: hidden;
 }
-.ln-image img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.ln-link-card {
-  display: block;
-  border-top: 1px solid var(--ln-line);
-  text-decoration: none;
-  color: inherit;
-}
-.ln-link-card:hover {
-  background: var(--ln-hover);
-}
-.ln-link-placeholder {
-  min-height: 140px;
-  background: #f3f2ef;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  text-align: center;
-  padding: 20px;
-}
-.ln-link-icon {
-  font-size: 28px;
-}
-.ln-link-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ln-txt);
-  max-width: 90%;
-}
-.ln-link-domain {
-  border-top: 1px solid var(--ln-line);
-  padding: 10px 16px;
-  font-size: 12px;
-  color: var(--ln-muted);
-}
-.quality-card {
+.ln-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Image gallery */
+.image-gallery {
+  margin: 14px 0; border: 1px solid var(--line); border-radius: 12px; padding: 12px;
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 14px;
-  margin-bottom: 14px;
 }
-.score-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 5px 0;
-  font-size: 14px;
+.gallery-label { font-size: 12px; color: var(--mut); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+.gallery-thumbs { display: flex; gap: 10px; flex-wrap: wrap; }
+.gallery-thumb {
+  width: 120px; height: 70px; border-radius: 8px; object-fit: cover; cursor: pointer;
+  border: 2px solid transparent; background: var(--card);
 }
-.score {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
+.gallery-thumb:hover { border-color: var(--accent); }
+.gallery-thumb.selected { border-color: var(--ok); }
+
+/* Quality card */
+.quality-card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px; margin-bottom: 14px;
 }
-.bar {
-  letter-spacing: 1px;
-}
+.score-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; font-size: 14px; }
+.score { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+.bar { letter-spacing: 1px; }
 .good { color: var(--ok); }
 .warn { color: var(--warn); }
 .bad { color: var(--bad); }
-.action-line {
-  margin-top: 10px;
-  font-size: 13px;
-  color: var(--mut);
-}
-.issues {
-  margin: 10px 0 0 18px;
-  padding: 0;
-  font-size: 13px;
-  color: var(--warn);
-}
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
+.action-line { margin-top: 10px; font-size: 13px; color: var(--mut); }
+.issues { margin: 10px 0 0 18px; padding: 0; font-size: 13px; color: var(--warn); }
+
+/* Actions */
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .btn {
-  background: var(--surface);
-  color: var(--txt);
-  border: 1px solid var(--line);
-  padding: 9px 16px;
-  border-radius: 9px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
+  background: var(--surface); color: var(--txt); border: 1px solid var(--line);
+  padding: 9px 16px; border-radius: 9px; cursor: pointer; font-size: 14px; font-weight: 500;
   transition: transform 0.05s ease, opacity 0.15s ease;
 }
 .btn:hover { opacity: 0.85; transform: translateY(-1px); }
@@ -614,56 +412,33 @@ h1 {
 .btn.edit { background: rgba(96,165,250,0.12); color: var(--accent); border-color: rgba(96,165,250,0.3); }
 .btn.image { background: rgba(168,85,247,0.12); color: #c084fc; border-color: rgba(168,85,247,0.3); }
 .btn.skip { background: rgba(239,68,68,0.1); color: var(--bad); border-color: rgba(239,68,68,0.3); }
+.btn.reject { background: rgba(239,68,68,0.15); color: var(--bad); border-color: rgba(239,68,68,0.4); }
 .btn.save { background: rgba(34,197,94,0.15); color: var(--ok); border-color: rgba(34,197,94,0.35); }
 .btn.cancel { background: transparent; color: var(--mut); }
-.edit-box {
-  margin-top: 14px;
+
+/* Edit panel */
+.edit-panel {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px; margin-bottom: 14px;
 }
-.edit-box textarea {
-  width: 100%;
-  background: var(--bg);
-  color: var(--txt);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 12px;
-  font-family: inherit;
-  font-size: 15px;
-  line-height: 1.5;
-  resize: vertical;
+.edit-label { font-size: 12px; color: var(--mut); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+.edit-panel textarea {
+  width: 100%; background: var(--bg); color: var(--txt); border: 1px solid var(--line);
+  border-radius: 10px; padding: 12px; font-family: inherit; font-size: 15px;
+  line-height: 1.5; resize: vertical;
 }
-.edit-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
-.empty {
-  text-align: center;
-  padding: 60px 20px;
-  color: var(--mut);
-}
-.empty-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
-}
-footer {
-  border-top: 1px solid var(--line);
-  margin-top: 32px;
-  padding: 20px 0 48px;
-}
-.note {
-  color: var(--mut);
-  font-size: 13px;
-}
-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  background: var(--surface);
-  padding: 2px 6px;
-  border-radius: 5px;
-}
+.edit-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+/* Reject box */
+.reject-box { display: none; margin-top: 14px; }
+.reject-box.active { display: block; }
+
+footer { border-top: 1px solid var(--line); margin-top: 32px; padding: 20px 0 48px; }
+.note { color: var(--mut); font-size: 13px; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--surface); padding: 2px 6px; border-radius: 5px; }
 @media (max-width: 560px) {
   .site-header .wrap { flex-direction: column; align-items: flex-start; }
   .today { text-align: left; }
-  .site-nav .wrap { flex-direction: column; align-items: flex-start; gap: 10px; }
   .ln-post.minimal { padding: 12px; }
   .ln-body { font-size: 14px; }
   .draft-card { padding: 16px; }

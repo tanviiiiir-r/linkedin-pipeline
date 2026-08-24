@@ -33,7 +33,7 @@ from pipeline.content_analyst import run_analysis
 from pipeline.dedupe import find_duplicate
 from pipeline.drafting import Draft, compile_newsletter, draft_item, load_drafts, save_draft
 from pipeline.drafting_v2 import draft_item_v2
-from pipeline.image_engine import image_for_post
+from pipeline.image_engine import extract_article_images, image_for_post
 from pipeline.invariants import run_health_checks
 from pipeline.log import setup_logging
 from pipeline.publishers.composio import (
@@ -569,10 +569,19 @@ def cmd_draft_today(args) -> int:
     queued = 0
     skip_image = getattr(args, "skip_image", False)
     for item, score in selected:
+        # Pre-fetch article/source image candidates so the draft can list them
+        candidates = extract_article_images(item.item_url, item.id, max_candidates=4)
+        if candidates:
+            item.image_candidates = candidates
+            try:
+                save_item(item)
+            except (OSError, RuntimeError):
+                logger.exception("Failed to persist item image_candidates")
+
         draft = draft_item_v2(item, score, day_plan=plan)
 
         if not skip_image:
-            img_path = image_for_post(
+            img_path, img_source = image_for_post(
                 item_url=item.item_url,
                 title=draft.title,
                 day=plan.day_name,
@@ -580,11 +589,14 @@ def cmd_draft_today(args) -> int:
                 linkedin_post=draft.linkedin_post,
                 hashtags=" ".join(draft.hashtags),
                 skip_og=force_comfy,
+                item_id=item.id,
             )
             if img_path:
                 draft.image_path = str(img_path)
+                draft.image_source = img_source
                 # Persist image path on the source item so future drafts can reuse it
                 item.image_path = str(img_path)
+                item.image_source = img_source
                 try:
                     save_item(item)
                 except (OSError, RuntimeError):

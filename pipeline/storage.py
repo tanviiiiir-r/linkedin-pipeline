@@ -45,6 +45,8 @@ class Item(BaseModel):
     reddit_comments: int = 0
     reddit_permalink: str = ""
     image_path: str = ""
+    image_source: str = ""  # source_native | og | article | comfy | placeholder
+    image_candidates: list[str] = Field(default_factory=list)
 
     model_config = {"extra": "ignore"}
 

@@ -118,6 +118,12 @@ def complete(prompt: str, system: str = "", temperature: float = 0.7) -> LLMResp
     raise RuntimeError(f"Unsupported LLM_PROVIDER: {LLM_PROVIDER}")
 
 
+def chat(prompt: str, model: str | None = None) -> str:
+    """Simple chat-style completion returning the raw text."""
+    resp = complete(prompt)
+    return resp.text
+
+
 def is_available() -> bool:
     """Return True if the configured provider appears reachable."""
     if LLM_PROVIDER in {"openai", "anthropic"}:

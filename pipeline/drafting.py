@@ -5,6 +5,7 @@ output. It also produces derivative formats: short LinkedIn post, newsletter
 section, and optional "pills" (data/forward-looking/narrative snippets).
 """
 import html
+import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +32,8 @@ class Draft(BaseModel):
     narrative_pill: str = "" # storytelling version
     hashtags: list[str] = []
     image_path: str = ""
+    image_source: str = ""
+    image_candidates: list[str] = []
 
 
 PILLAR_HASHTAGS = {
@@ -181,6 +184,8 @@ created_at: {draft.created_at}
 approved: {draft.approved}
 published: {draft.published}
 image_path: {draft.image_path}
+image_source: {draft.image_source}
+image_candidates: {json.dumps(draft.image_candidates)}
 hashtags: {', '.join(draft.hashtags)}
 ---
 
@@ -260,6 +265,8 @@ def _parse_draft_markdown(text: str) -> Draft | None:
         approved=data.get("approved", "false").lower() == "true",
         published=data.get("published", "false").lower() == "true",
         image_path=data.get("image_path", ""),
+        image_source=data.get("image_source", ""),
+        image_candidates=json.loads(data.get("image_candidates") or "[]"),
         linkedin_post=sections.get("LinkedIn Post", ""),
         newsletter_section=sections.get("Newsletter Section", ""),
         short_pill=sections.get("Short Pill", ""),

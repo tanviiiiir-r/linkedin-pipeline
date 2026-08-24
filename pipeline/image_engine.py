@@ -33,6 +33,9 @@ COMFY_INIT_DELAY_SECONDS = int(__import__("os").getenv("COMFY_INIT_DELAY_SECONDS
 IMAGE_DIR = DATA_DIR / "images"
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
+IMAGE_CANDIDATES_DIR = DATA_DIR / "image_candidates"
+IMAGE_CANDIDATES_DIR.mkdir(parents=True, exist_ok=True)
+
 
 
 def _generate_placeholder(title: str, output_path: Path, width: int = 1200, height: int = 627) -> Path:
@@ -385,6 +388,118 @@ def _generate_with_comfy(prompt: str, output_path: Path, width: int = 1216, heig
     return None
 
 
+
+
+def _absolute_url(base: str, src: str) -> str | None:
+    """Resolve a possibly-relative image src URL."""
+    if not src:
+        return None
+    src = src.strip()
+    if src.startswith(("http://", "https://")):
+        return src
+    if src.startswith("//"):
+        return "https:" + src
+    from urllib.parse import urljoin
+    return urljoin(base, src)
+
+
+def _is_large_enough(img) -> bool:
+    """Reject tiny icons, avatars, and tracking pixels."""
+    try:
+        w = int(img.get("width", "0").replace("px", "").strip() or 0)
+        h = int(img.get("height", "0").replace("px", "").strip() or 0)
+    except ValueError:
+        w, h = 0, 0
+    if w and h:
+        return w >= 240 and h >= 120
+    # If dimensions not in HTML, allow and check after download
+    return True
+
+
+def extract_article_images(url: str, item_id: str, max_candidates: int = 4) -> list[str]:
+    """Download OG + article body image candidates for a URL."""
+    candidates_dir = IMAGE_CANDIDATES_DIR / item_id
+    candidates_dir.mkdir(parents=True, exist_ok=True)
+    found: list[str] = []
+    try:
+        page_resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        page_resp.raise_for_status()
+        html = page_resp.text
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+
+        # 1. OG image
+        og = soup.find("meta", property="og:image") or soup.find("meta", attrs={"property": "og:image"})
+        if og:
+            img_url = og.get("content")
+            abs_url = _absolute_url(url, img_url)
+            if abs_url:
+                path = _download_image(abs_url, candidates_dir / "og.jpg")
+                if path:
+                    found.append(str(path))
+
+        # 2. Twitter image
+        if len(found) < max_candidates:
+            tw = soup.find("meta", attrs={"name": "twitter:image"}) or soup.find("meta", property="twitter:image")
+            if tw:
+                img_url = tw.get("content")
+                abs_url = _absolute_url(url, img_url)
+                if abs_url:
+                    path = _download_image(abs_url, candidates_dir / "twitter.jpg")
+                    if path and str(path) not in found:
+                        found.append(str(path))
+
+        # 3. Article body images
+        if len(found) < max_candidates:
+            for tag in soup.select("article img, main img, .post-content img, .entry-content img"):
+                if len(found) >= max_candidates:
+                    break
+                src = tag.get("src") or tag.get("data-src") or tag.get("data-lazy-src")
+                abs_url = _absolute_url(url, src)
+                if not abs_url:
+                    continue
+                if not _is_large_enough(tag):
+                    continue
+                suffix = Path(abs_url).suffix or ".jpg"
+                suffix = suffix.split("?")[0] or ".jpg"
+                if suffix not in (".jpg", ".jpeg", ".png", ".webp"):
+                    suffix = ".jpg"
+                name = f"article_{len(found)}{suffix}"
+                path = _download_image(abs_url, candidates_dir / name)
+                if path and str(path) not in found:
+                    found.append(str(path))
+    except (requests.exceptions.RequestException, OSError):
+        logger.exception("Article image extraction failed for %s", url)
+    return found
+
+
+def _download_image(url: str, output_path: Path) -> Path | None:
+    """Download an image and convert webp to jpg for preview compatibility."""
+    try:
+        img_resp = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0", "Accept": "image/webp,image/apng,image/*,*/*;q=0.8"})
+        img_resp.raise_for_status()
+        content = img_resp.content
+        if not content:
+            return None
+        output_path.write_bytes(content)
+        # Convert webp to jpg if Pillow available
+        if output_path.suffix.lower() == ".webp":
+            try:
+                from PIL import Image
+                jpg_path = output_path.with_suffix(".jpg")
+                with Image.open(output_path) as im:
+                    im.convert("RGB").save(jpg_path, "JPEG")
+                output_path.unlink()
+                return jpg_path
+            except (OSError, ValueError):
+                logger.warning("Could not convert webp to jpg for %s", url)
+        logger.info("Downloaded article image: %s", output_path)
+        return output_path
+    except (requests.exceptions.RequestException, OSError):
+        logger.exception("Image download failed: %s", url)
+    return None
+
+
 def _fetch_og_image(url: str, output_path: Path) -> Path | None:
     try:
         page_resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
@@ -417,26 +532,43 @@ def image_for_post(
     height: int = 704,
     skip_comfy: bool = False,
     skip_og: bool = False,
-) -> Path | None:
-    """Return a local image path for the post, using OG first then ComfyUI."""
+    item_id: str = "",
+) -> tuple[Path | None, str]:
+    """Return a local image path for the post and its source label.
+
+    Fallback chain:
+    1. Pre-fetched article/source candidates (if item_id provided)
+    2. OpenGraph image from the URL
+    3. RunPod ComfyUI generated image
+    4. Branded placeholder
+    """
     if not item_url:
-        return None
+        return None, "none"
     h = _slug(title) or _slug(item_url)
     output_path = IMAGE_DIR / f"{h}.png"
     if output_path.exists() and not skip_og:
-        return output_path
+        return output_path, "unknown"
 
-    # 1. Try OG image
+    # 1. Use pre-downloaded article candidates if available
+    if item_id and IMAGE_CANDIDATES_DIR.exists():
+        candidates_dir = IMAGE_CANDIDATES_DIR / item_id
+        if candidates_dir.exists():
+            for cand in sorted(candidates_dir.iterdir()):
+                if cand.is_file() and cand.suffix.lower() in (".jpg", ".jpeg", ".png"):
+                    logger.info("Using pre-fetched article image: %s", cand)
+                    return cand, "article"
+
+    # 2. Try OG image
     if not skip_og:
         og_path = output_path.with_suffix(".og.jpg")
         og = _fetch_og_image(item_url, og_path)
         if og:
-            return og
+            return og, "og"
 
     if skip_comfy:
-        return None
+        return None, "none"
 
-    # 2. Try ComfyUI generation
+    # 3. Try ComfyUI generation
     if not RUNPOD_API_KEY or not COMFY_PROXY_URL:
         logger.warning("RunPod/ComfyUI not configured")
         return None

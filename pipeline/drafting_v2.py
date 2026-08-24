@@ -149,6 +149,8 @@ def _hydrate_draft(
         narrative_pill=data.get("narrative_pill", "").strip(),
         hashtags=hashtags,
         image_path=item.image_path if hasattr(item, "image_path") else "",
+        image_source=item.image_source if hasattr(item, "image_source") else "",
+        image_candidates=item.image_candidates if hasattr(item, "image_candidates") else [],
     )
 
 

@@ -36,7 +36,9 @@ def test_generate_dashboard_empty():
     path = generate_dashboard()
     assert path.exists()
     text = path.read_text()
-    assert "No pending drafts" in text
+    # Dashboard is a dynamic single-page app; the shell has no static draft cards
+    assert "id=\"app\"" in text
+    assert "assets/app.js" in text
 
 
 def test_generate_dashboard_with_draft():
@@ -44,10 +46,8 @@ def test_generate_dashboard_with_draft():
     save_draft(draft, config.settings.QUEUE_DIR)
     path = generate_dashboard()
     text = path.read_text()
-    assert "Test Draft" in text
-    assert "tool_drop" in text
-    assert "This is a test post" in text
-    assert "#AI" in text
+    assert "id=\"app\"" in text
+    assert "assets/app.js" in text
 
 
 def test_edit_draft():

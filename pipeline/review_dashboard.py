@@ -9,17 +9,16 @@ CLI wrapper lives in pipeline/hermes.py (`review-dashboard`).
 from __future__ import annotations
 
 import html
-import json
 import logging
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
 from config.calendar import day_plan
-from config.settings import DATA_DIR, QUEUE_DIR, REVIEW_DIR, ensure_dirs
+from config.settings import QUEUE_DIR, REVIEW_DIR, ensure_dirs
 from pipeline.approval import list_pending
 from pipeline.content_analyst import analyze_queued_items
-from pipeline.drafting import Draft, load_drafts
+from pipeline.drafting import Draft
 
 logger = logging.getLogger(__name__)
 

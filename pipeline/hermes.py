@@ -34,8 +34,6 @@ from pipeline.dedupe import find_duplicate
 from pipeline.drafting import Draft, compile_newsletter, draft_item, load_drafts, save_draft
 from pipeline.drafting_v2 import draft_item_v2
 from pipeline.image_engine import image_for_post
-from pipeline.review_dashboard import generate_dashboard
-from pipeline.review_server import run_server
 from pipeline.invariants import run_health_checks
 from pipeline.log import setup_logging
 from pipeline.publishers.composio import (
@@ -43,6 +41,8 @@ from pipeline.publishers.composio import (
     get_composio_twitter_publisher,
 )
 from pipeline.publishers.linkedin import DirectLinkedInPublisher, DryRunPublisher
+from pipeline.review_dashboard import generate_dashboard
+from pipeline.review_server import run_server
 from pipeline.scoring import is_worthy, score_item
 from pipeline.storage import Item, init_db, item_exists, list_items, save_item, update_status
 from pipeline.tokens import clear_tokens, load_tokens, save_tokens
@@ -745,7 +745,7 @@ def cmd_review_dashboard(args) -> int:
     ensure_dirs()
     path = generate_dashboard()
     print(f"Review dashboard generated: {path}")
-    print(f"Start server with: python run.py review-server")
+    print("Start server with: python run.py review-server")
     return 0
 
 

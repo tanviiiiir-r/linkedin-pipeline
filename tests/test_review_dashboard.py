@@ -1,11 +1,10 @@
 """Tests for review dashboard and server helpers."""
-from pathlib import Path
 
 import pytest
 
-from config.settings import DATA_DIR, QUEUE_DIR, REVIEW_DIR
+from config.settings import QUEUE_DIR
 from pipeline.approval import approve_draft, edit_draft, skip_draft
-from pipeline.drafting import Draft, _draft_markdown, save_draft
+from pipeline.drafting import Draft, save_draft
 from pipeline.review_dashboard import generate_dashboard
 
 

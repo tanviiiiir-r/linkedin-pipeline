@@ -67,6 +67,7 @@ RECENCY_POLICY = {
     "planned_half_life_hours": int(os.getenv("PLANNED_HALF_LIFE_HOURS", "168")),
     "age_penalty_start_hours": int(os.getenv("AGE_PENALTY_START_HOURS", "24")),
     "selection_threshold": int(os.getenv("SELECTION_THRESHOLD", "35")),
+    "planned_selection_floor": int(os.getenv("PLANNED_SELECTION_FLOOR", "10")),
     "source_max_age_hours": {
         "rss": int(os.getenv("RSS_MAX_AGE_HOURS", "72")),
         "reddit": int(os.getenv("REDDIT_MAX_AGE_HOURS", "48")),

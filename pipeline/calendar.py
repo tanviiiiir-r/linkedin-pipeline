@@ -139,8 +139,8 @@ def select_for_day(
             for item, score, rank in planned
         ]
         planned.sort(key=lambda x: x[2], reverse=True)
-        # Planned items need less strict threshold than breaking signals
-        planned_threshold = max(0, threshold - 35)
+        # Planned items need less strict threshold than breaking signals, with a floor
+        planned_threshold = max(RECENCY_POLICY["planned_selection_floor"], threshold - 20)
         if planned and planned[0][2] >= planned_threshold:
             logger.info(
                 "Calendar selection for %s: %d planned candidates, top rank %d",

@@ -88,9 +88,9 @@ def test_hybrid_falls_back_to_planned():
     plan = day_plan(date(2026, 8, 24))  # Monday
     stale = _item("Stale tool", "GitHub", "Old CLI.", hours_old=80)
     planned = _item(
-        "Planned evergreen tool tip",
+        "Planned SQLite CLI tool tip",
         "Simon Willison",
-        "A practical SQLite trick for AI apps.",
+        "A practical SQLite CLI trick for AI apps, released this week.",
         hours_old=12,
         queue_type="planned",
         expires_at=(datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),

@@ -1,10 +1,7 @@
-"""Generate a static review dashboard for LinkedIn drafts.
+"""Generate a polished review dashboard for LinkedIn drafts.
 
-Usage:
-    from pipeline.review_dashboard import generate_dashboard
-    generate_dashboard()
-
-CLI wrapper lives in pipeline/hermes.py (`review-dashboard`).
+The dashboard renders each draft inside a LinkedIn-style post preview so the
+operator sees exactly how the post will look in the feed before approving.
 """
 from __future__ import annotations
 
@@ -22,7 +19,6 @@ from pipeline.drafting import Draft
 
 logger = logging.getLogger(__name__)
 
-ASSETS_DIR = Path(__file__).with_suffix("").parent / "review_assets"
 REVIEW_IMAGES_DIR = REVIEW_DIR / "images"
 REVIEW_SKIPPED_DIR = QUEUE_DIR / "skipped"
 
@@ -32,8 +28,9 @@ def _asset_path(name: str) -> Path:
 
 
 def _ensure_assets() -> None:
-    (_review_css := _asset_path("style.css")).parent.mkdir(parents=True, exist_ok=True)
-    _review_css.write_text(_CSS)
+    (_css := _asset_path("style.css")).parent.mkdir(parents=True, exist_ok=True)
+    _css.write_text(_CSS)
+    (_js := _asset_path("app.js")).write_text(_JS)
 
 
 def _copy_image_for_review(image_path: str, item_id: str) -> str | None:
@@ -61,75 +58,112 @@ def _score_color(score: int) -> str:
     return "bad"
 
 
-def _bar(score: int) -> str:
-    filled = round(score / 10)
-    empty = 10 - filled
-    return "●" * filled + "○" * empty
+def _link_preview(draft: Draft, image_rel: str | None) -> str:
+    """Render a LinkedIn-style link preview card when no image is provided."""
+    if image_rel:
+        return f'''
+      <div class="ln-image">
+        <img src="images/{html.escape(Path(image_rel).name)}" alt="" loading="lazy" />
+      </div>'''
+    from urllib.parse import urlparse
+    try:
+        domain = urlparse(draft.source_url).netloc.replace("www.", "")
+    except ValueError as exc:
+        logger.warning("Could not parse source URL for link preview: %s", exc)
+        domain = "Source"
+    if not domain:
+        domain = "Source"
+    return f'''
+      <a class="ln-link-card" href="{html.escape(draft.source_url)}" target="_blank" rel="noopener">
+        <div class="ln-link-placeholder">
+          <div class="ln-link-icon">🔗</div>
+          <div class="ln-link-title">{html.escape(draft.title[:90])}</div>
+        </div>
+        <div class="ln-link-domain">{html.escape(domain)}</div>
+      </a>'''
+
+
+def _format_post_body(text: str) -> str:
+    """Format the LinkedIn post body for preview: keep line breaks, bold bullet-like markers."""
+    text = html.escape(text)
+    text = text.replace("\n", "<br />")
+    # Highlight leading bullets
+    text = re_sub_bullets(text)
+    return text
+
+
+def re_sub_bullets(text: str) -> str:
+    import re
+    return re.sub(r"(^|<br /\u003e)([•·\-\*])\s+", r"\1\2 ", text)
 
 
 def _draft_card(draft: Draft, analysis: dict | None, image_rel: str | None) -> str:
     title_escaped = html.escape(draft.title)
-    post_escaped = html.escape(draft.linkedin_post).replace("\n", "\u003cbr\u003e")
-    hashtags = " ".join(html.escape(t) for t in draft.hashtags)
+    body_html = _format_post_body(draft.linkedin_post)
+    hashtags = " ".join(f"<span>{html.escape(t)}</span>" for t in draft.hashtags)
     rel = analysis or {}
     rel_score = rel.get("relevance_score", 0)
     acc_score = rel.get("accuracy_score", 0)
     perf_score = rel.get("perfection_score", 0)
     issues = rel.get("issues", [])
     action = rel.get("proposed_action", "—")
-
-    image_html = ""
-    if image_rel:
-        image_html = f'''
-        <div class="image-box">
-            <img src="images/{html.escape(Path(image_rel).name)}" alt="Draft image" loading="lazy" />
-        </div>'''
+    plan = day_plan()
 
     issues_html = ""
     if issues:
-        issues_html = "\n".join(f"        <li>⚠️ {html.escape(str(i))}</li>" for i in issues)
+        issues_html = "\n".join(f"        <li>{html.escape(str(i))}</li>" for i in issues)
         issues_html = f"      <ul class=\"issues\"\u003e\n{issues_html}\n      </ul\u003e"
+
+    linkedin_preview = f'''
+    <div class="ln-post minimal">
+      <div class="ln-body" id="post-{html.escape(draft.item_id)}">{body_html}</div>
+      <div class="ln-hashtags">{hashtags}</div>
+{_link_preview(draft, image_rel)}
+    </div>'''
 
     return f'''
     <article class="draft-card" data-item-id="{html.escape(draft.item_id)}" data-pillar="{html.escape(draft.pillar)}">
-      <div class="card-header">
-        <div class="meta">
-          <span class="day-badge">{html.escape(day_plan().day_name)}</span>
+      <div class="card-meta">
+        <div class="left">
+          <span class="day-badge">{html.escape(plan.day_name)}</span>
           <span class="pillar">{html.escape(draft.pillar.replace('_', ' ').title())}</span>
           <span class="item-id">#{html.escape(draft.item_id[:8])}</span>
         </div>
-        <h2>{title_escaped}</h2>
-        <a href="{html.escape(draft.source_url)}" target="_blank" rel="noopener" class="source-link">Source →</a>
+        <a class="source-link" href="{html.escape(draft.source_url)}" target="_blank" rel="noopener">Source →</a>
       </div>
-{image_html}
-      <div class="post-preview">
-        <div class="post-body" id="post-{html.escape(draft.item_id)}">{post_escaped}</div>
-        <div class="hashtags">{hashtags}</div>
+      <h2 class="draft-title">{title_escaped}</h2>
+
+      <div class="preview-shell">
+        <div class="preview-label">LinkedIn preview</div>
+{linkedin_preview}
       </div>
+
       <div class="quality-card">
         <div class="score-row">
           <span>Relevance</span>
-          <span class="score {_score_color(rel_score)}">{rel_score}/100 {_bar(rel_score)}</span>
+          <span class="score {_score_color(rel_score)}">{rel_score}/100 <span class="bar">{_bar(rel_score)}</span></span>
         </div>
         <div class="score-row">
           <span>Accuracy</span>
-          <span class="score {_score_color(acc_score)}">{acc_score}/100 {_bar(acc_score)}</span>
+          <span class="score {_score_color(acc_score)}">{acc_score}/100 <span class="bar">{_bar(acc_score)}</span></span>
         </div>
         <div class="score-row">
           <span>Perfection</span>
-          <span class="score {_score_color(perf_score)}">{perf_score}/100 {_bar(perf_score)}</span>
+          <span class="score {_score_color(perf_score)}">{perf_score}/100 <span class="bar">{_bar(perf_score)}</span></span>
         </div>
         <div class="action-line">Proposed action: <strong>{html.escape(action)}</strong></div>
 {issues_html}
       </div>
+
       <div class="actions">
         <button class="btn approve" onclick="approve('{html.escape(draft.item_id)}')">✅ Approve</button>
         <button class="btn edit" onclick="startEdit('{html.escape(draft.item_id)}')">✏️ Edit</button>
         <button class="btn image" onclick="regenerateImage('{html.escape(draft.item_id)}')">🔄 Regenerate image</button>
         <button class="btn skip" onclick="skip('{html.escape(draft.item_id)}')">⏭ Skip</button>
       </div>
+
       <div class="edit-box" id="edit-{html.escape(draft.item_id)}" style="display:none;">
-        <textarea id="textarea-{html.escape(draft.item_id)}" rows="10">{html.escape(draft.linkedin_post)}</textarea>
+        <textarea id="textarea-{html.escape(draft.item_id)}" rows="12">{html.escape(draft.linkedin_post)}</textarea>
         <div class="edit-actions">
           <button class="btn save" onclick="saveEdit('{html.escape(draft.item_id)}')">💾 Save</button>
           <button class="btn cancel" onclick="cancelEdit('{html.escape(draft.item_id)}')">Cancel</button>
@@ -138,11 +172,18 @@ def _draft_card(draft: Draft, analysis: dict | None, image_rel: str | None) -> s
     </article>'''
 
 
+def _bar(score: int) -> str:
+    filled = round(score / 10)
+    empty = 10 - filled
+    return "█" * filled + "░" * empty
+
+
 def _empty_state() -> str:
     return '''
     <article class="draft-card empty">
+      <div class="empty-icon">📭</div>
       <h2>No pending drafts</h2>
-      <p>Run <code>python run.py draft-today --with-image</code> to create one.</p>
+      <p>Run <code>python run.py draft-today --with-image</code> to create one for review.</p>
     </article>'''
 
 
@@ -153,7 +194,6 @@ def generate_dashboard() -> Path:
     REVIEW_SKIPPED_DIR.mkdir(parents=True, exist_ok=True)
 
     pending = list_pending()
-    # Run analysis across pending drafts for today
     analysis_results = analyze_queued_items(limit=50) if pending else []
     analysis_by_id = {r.item_id: r for r in analysis_results}
 
@@ -173,11 +213,14 @@ def generate_dashboard() -> Path:
         cards.append(_draft_card(draft, analysis_dict, image_rel))
 
     body = "\n".join(cards) if cards else _empty_state()
+    plan = day_plan()
 
     index_path = REVIEW_DIR / "index.html"
     index_path.write_text(_HTML_TEMPLATE.format(
         generated_at=datetime.now(timezone.utc).isoformat(),
         count=len(cards),
+        day=html.escape(plan.day_name),
+        pillar=html.escape(plan.post_type.replace('_', ' ').title()),
         body=body,
     ))
     logger.info("Review dashboard generated: %s (%s drafts)", index_path, len(cards))
@@ -193,127 +236,159 @@ _HTML_TEMPLATE = '''<!DOCTYPE html>
   <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>
-  <header>
+  <header class="site-header">
     <div class="wrap">
-      <h1>🔗 LinkedIn Draft Review</h1>
-      <p class="sub">Human approval gate. Approve, edit, skip, or regenerate images before publishing.</p>
-      <nav class="tabs">
-        <button class="tab active" disabled>LinkedIn</button>
-        <!-- Tabs reserved for future workstreams -->
-      </nav>
-      <div class="stats">
-        <span>{count} pending draft(s)</span>
-        <span class="generated">Generated {generated_at}</span>
+      <div class="brand">
+        <div class="logo">🔗</div>
+        <div>
+          <h1>Draft Review</h1>
+          <div class="sub">Human approval gate for LinkedIn posts</div>
+        </div>
+      </div>
+      <div class="today">
+        <div class="day">{day}</div>
+        <div class="pillar">{pillar}</div>
       </div>
     </div>
   </header>
+
+  <nav class="site-nav">
+    <div class="wrap">
+      <div class="tabs">
+        <button class="tab active" disabled>LinkedIn</button>
+      </div>
+      <div class="stats">
+        <span class="count">{count} pending</span>
+        <span class="generated">Generated {generated_at}</span>
+      </div>
+    </div>
+  </nav>
+
   <main class="wrap">
 {body}
   </main>
+
   <footer class="wrap">
-    <p class="note">No post is published from this screen. After approval, run <code>python run.py publish --dry-run</code> or the full publish command.</p>
+    <p class="note">No post is published from this screen. Approve here, then run <code>python run.py publish --dry-run</code>.</p>
   </footer>
-  <script>
-    async function api(path, payload) {{
-      const r = await fetch('/api' + path, {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/json'}},
-        body: JSON.stringify(payload)
-      }});
-      return r.json();
-    }}
-    async function approve(id) {{
-      const data = await api('/approve', {{item_id: id}});
-      if (data.ok) document.querySelector(`article[data-item-id="${{id}}"]`).classList.add('approved');
-      alert(data.ok ? 'Approved' : 'Failed: ' + (data.error || 'unknown'));
-    }}
-    async function skip(id) {{
-      if (!confirm('Skip this draft? It will be moved to the skipped folder.')) return;
-      const data = await api('/skip', {{item_id: id}});
-      if (data.ok) document.querySelector(`article[data-item-id="${{id}}"]`).remove();
-      alert(data.ok ? 'Skipped' : 'Failed: ' + (data.error || 'unknown'));
-    }}
-    function startEdit(id) {{
-      document.getElementById('edit-' + id).style.display = 'block';
-    }}
-    function cancelEdit(id) {{
-      document.getElementById('edit-' + id).style.display = 'none';
-    }}
-    async function saveEdit(id) {{
-      const text = document.getElementById('textarea-' + id).value;
-      const data = await api('/edit', {{item_id: id, linkedin_post: text}});
-      if (data.ok) {{
-        document.getElementById('post-' + id).innerHTML = text.replace(/\n/g, '<br>');
-        cancelEdit(id);
-      }}
-      alert(data.ok ? 'Saved' : 'Failed: ' + (data.error || 'unknown'));
-    }}
-    async function regenerateImage(id) {{
-      if (!confirm('This may wake and run your RunPod ComfyUI pod. Continue?')) return;
-      const btn = event.target;
-      btn.disabled = true;
-      btn.textContent = 'Running…';
-      const data = await api('/regenerate-image', {{item_id: id}});
-      btn.disabled = false;
-      btn.textContent = '🔄 Regenerate image';
-      if (data.ok && data.image_url) {{
-        const card = document.querySelector(`article[data-item-id="${{id}}"]`);
-        let box = card.querySelector('.image-box');
-        const imgHtml = `<div class="image-box"><img src="${{data.image_url}}" alt="Draft image" /></div>`;
-        if (box) box.outerHTML = imgHtml;
-        else card.querySelector('.post-preview').insertAdjacentHTML('beforebegin', imgHtml);
-      }}
-      alert(data.ok ? 'Image regenerated' : 'Failed: ' + (data.error || 'unknown'));
-    }}
-  </script>
+
+  <script src="assets/app.js"></script>
 </body>
 </html>'''
 
 
 _CSS = '''
 :root {{
-  --bg: #0f1115;
-  --card: #161922;
-  --line: #2a2f3a;
-  --txt: #e2e8f0;
-  --mut: #94a3b8;
-  --ok: #4ade80;
-  --warn: #facc15;
-  --bad: #f87171;
+  --bg: #0b0d10;
+  --surface: #13161d;
+  --card: #1a1e27;
+  --line: #2a3040;
+  --txt: #f0f2f7;
+  --mut: #8b95a7;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --bad: #ef4444;
   --accent: #60a5fa;
+  --ln-bg: #ffffff;
+  --ln-txt: #1f1f1f;
+  --ln-muted: #666666;
+  --ln-link: #0a66c2;
+  --ln-line: #e0e0e0;
+  --ln-hover: #f3f2ef;
 }}
 * {{ box-sizing: border-box; }}
+html {{ scroll-behavior: smooth; }}
 body {{
   margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background: var(--bg);
   color: var(--txt);
-  line-height: 1.55;
+  line-height: 1.5;
 }}
 .wrap {{
   max-width: 760px;
   margin: 0 auto;
   padding: 0 18px;
 }}
-header {{
+.site-header {{
   border-bottom: 1px solid var(--line);
-  padding: 24px 0 18px;
-  margin-bottom: 24px;
+  background: linear-gradient(180deg, rgba(96,165,250,0.08) 0%, transparent 100%);
 }}
-h1 {{ margin: 0 0 6px; font-size: 24px; }}
-.sub {{ color: var(--mut); margin: 0 0 16px; }}
+.site-header .wrap {{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 22px;
+  padding-bottom: 22px;
+}}
+.brand {{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}}
+.logo {{
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #0b1020;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+}}
+h1 {{
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}}
+.sub {{
+  color: var(--mut);
+  font-size: 13px;
+  margin-top: 2px;
+}}
+.today {{
+  text-align: right;
+}}
+.today .day {{
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}}
+.today .pillar {{
+  font-size: 13px;
+  color: var(--mut);
+  text-transform: capitalize;
+}}
+.site-nav {{
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}}
+.site-nav .wrap {{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}}
 .tabs {{
   display: flex;
   gap: 8px;
-  margin-bottom: 16px;
 }}
 .tab {{
   background: transparent;
   border: 1px solid var(--line);
   color: var(--mut);
-  padding: 8px 14px;
+  padding: 7px 14px;
   border-radius: 999px;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 500;
 }}
 .tab.active {{
   background: var(--card);
@@ -322,40 +397,51 @@ h1 {{ margin: 0 0 6px; font-size: 24px; }}
 }}
 .stats {{
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
   color: var(--mut);
   font-size: 13px;
 }}
-.generated {{ font-family: ui-monospace, monospace; }}
+.stats .count {{
+  background: var(--card);
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+  border-radius: 999px;
+}}
+.generated {{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}}
 .draft-card {{
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 18px;
+  border-radius: 16px;
+  padding: 20px;
   margin: 18px 0;
+  transition: border-color 0.15s ease, opacity 0.15s ease;
 }}
 .draft-card.approved {{
   border-color: var(--ok);
-  opacity: 0.85;
+  opacity: 0.8;
 }}
-.card-header {{
+.card-meta {{
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}}
-.meta {{
-  display: flex;
-  gap: 8px;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}}
+.card-meta .left {{
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
 }}
 .day-badge {{
-  background: var(--accent);
-  color: #0b1020;
-  padding: 2px 10px;
+  background: rgba(96,165,250,0.15);
+  color: var(--accent);
+  padding: 3px 10px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
@@ -370,66 +456,134 @@ h1 {{ margin: 0 0 6px; font-size: 24px; }}
   font-size: 12px;
   font-family: ui-monospace, monospace;
 }}
-h2 {{
-  font-size: 18px;
-  margin: 0;
-  flex: 1 1 100%;
-}}
 .source-link {{
   color: var(--accent);
   font-size: 13px;
   text-decoration: none;
+  font-weight: 500;
 }}
-.image-box {{
-  margin: 14px 0;
-  border-radius: 10px;
-  overflow: hidden;
+.draft-title {{
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0 0 16px;
+  color: var(--txt);
+}}
+.preview-shell {{
+  background: var(--bg);
   border: 1px solid var(--line);
-}}
-.image-box img {{
-  display: block;
-  width: 100%;
-  height: auto;
-}}
-.post-preview {{
-  background: #0b1020;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 14px;
   padding: 14px;
-  margin: 14px 0;
-  white-space: pre-wrap;
+  margin-bottom: 16px;
 }}
-.post-body {{
-  font-size: 15px;
+.preview-label {{
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--mut);
   margin-bottom: 10px;
 }}
-.hashtags {{
-  color: var(--accent);
+.ln-post {{
+  background: var(--ln-bg);
+  color: var(--ln-txt);
+  border: 1px solid var(--ln-line);
+  border-radius: 10px;
+  max-width: 680px;
+  margin: 0 auto;
+  overflow: hidden;
+}}
+.ln-post.minimal {{
+  padding: 16px;
+}}
+.ln-body {{
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ln-txt);
+  white-space: pre-wrap;
+  margin-bottom: 10px;
+}}
+.ln-hashtags {{
+  color: var(--ln-link);
   font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 14px;
+}}
+.ln-hashtags span {{
+  margin-right: 6px;
+}}
+.ln-image {{
+  border-top: 1px solid var(--ln-line);
+  width: 100%;
+  aspect-ratio: 1.91 / 1;
+  background: #f3f2ef;
+  overflow: hidden;
+}}
+.ln-image img {{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}}
+.ln-link-card {{
+  display: block;
+  border-top: 1px solid var(--ln-line);
+  text-decoration: none;
+  color: inherit;
+}}
+.ln-link-card:hover {{
+  background: var(--ln-hover);
+}}
+.ln-link-placeholder {{
+  min-height: 140px;
+  background: #f3f2ef;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  padding: 20px;
+}}
+.ln-link-icon {{
+  font-size: 28px;
+}}
+.ln-link-title {{
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ln-txt);
+  max-width: 90%;
+}}
+.ln-link-domain {{
+  border-top: 1px solid var(--ln-line);
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--ln-muted);
 }}
 .quality-card {{
-  background: #0b1020;
+  background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 14px;
-  margin: 14px 0;
+  margin-bottom: 14px;
 }}
 .score-row {{
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 4px 0;
+  padding: 5px 0;
   font-size: 14px;
 }}
 .score {{
-  font-family: ui-monospace, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
+}}
+.bar {{
+  letter-spacing: 1px;
 }}
 .good {{ color: var(--ok); }}
 .warn {{ color: var(--warn); }}
 .bad {{ color: var(--bad); }}
 .action-line {{
-  margin-top: 8px;
+  margin-top: 10px;
   font-size: 13px;
   color: var(--mut);
 }}
@@ -443,36 +597,39 @@ h2 {{
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 14px;
 }}
 .btn {{
-  background: var(--line);
+  background: var(--surface);
   color: var(--txt);
   border: 1px solid var(--line);
-  padding: 8px 14px;
-  border-radius: 8px;
+  padding: 9px 16px;
+  border-radius: 9px;
   cursor: pointer;
   font-size: 14px;
+  font-weight: 500;
+  transition: transform 0.05s ease, opacity 0.15s ease;
 }}
-.btn:hover {{ opacity: 0.85; }}
-.btn.approve {{ background: #14532d; border-color: #22c55e; }}
-.btn.edit {{ background: #1e3a8a; border-color: #3b82f6; }}
-.btn.image {{ background: #581c87; border-color: #a855f7; }}
-.btn.skip {{ background: #450a0a; border-color: #ef4444; }}
-.btn.save {{ background: #14532d; border-color: #22c55e; }}
-.btn.cancel {{ background: transparent; }}
+.btn:hover {{ opacity: 0.85; transform: translateY(-1px); }}
+.btn.approve {{ background: rgba(34,197,94,0.15); color: var(--ok); border-color: rgba(34,197,94,0.35); }}
+.btn.edit {{ background: rgba(96,165,250,0.12); color: var(--accent); border-color: rgba(96,165,250,0.3); }}
+.btn.image {{ background: rgba(168,85,247,0.12); color: #c084fc; border-color: rgba(168,85,247,0.3); }}
+.btn.skip {{ background: rgba(239,68,68,0.1); color: var(--bad); border-color: rgba(239,68,68,0.3); }}
+.btn.save {{ background: rgba(34,197,94,0.15); color: var(--ok); border-color: rgba(34,197,94,0.35); }}
+.btn.cancel {{ background: transparent; color: var(--mut); }}
 .edit-box {{
   margin-top: 14px;
 }}
 .edit-box textarea {{
   width: 100%;
-  background: #0b1020;
+  background: var(--bg);
   color: var(--txt);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 10px;
+  border-radius: 10px;
+  padding: 12px;
   font-family: inherit;
-  font-size: 14px;
+  font-size: 15px;
+  line-height: 1.5;
+  resize: vertical;
 }}
 .edit-actions {{
   display: flex;
@@ -481,26 +638,110 @@ h2 {{
 }}
 .empty {{
   text-align: center;
+  padding: 60px 20px;
   color: var(--mut);
+}}
+.empty-icon {{
+  font-size: 48px;
+  margin-bottom: 12px;
 }}
 footer {{
   border-top: 1px solid var(--line);
   margin-top: 32px;
-  padding: 18px 0 40px;
+  padding: 20px 0 48px;
 }}
 .note {{
   color: var(--mut);
   font-size: 13px;
 }}
 code {{
-  font-family: ui-monospace, monospace;
-  background: #0b1020;
-  padding: 2px 5px;
-  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--surface);
+  padding: 2px 6px;
+  border-radius: 5px;
 }}
-@media (max-width: 520px) {{
-  .stats {{ flex-direction: column; gap: 4px; }}
-  h2 {{ font-size: 16px; }}
+@media (max-width: 560px) {{
+  .site-header .wrap {{ flex-direction: column; align-items: flex-start; }}
+  .today {{ text-align: left; }}
+  .site-nav .wrap {{ flex-direction: column; align-items: flex-start; gap: 10px; }}
+  .ln-post.minimal {{ padding: 12px; }}
+  .ln-body {{ font-size: 14px; }}
+  .draft-card {{ padding: 16px; }}
+}}
+'''
+
+
+_JS = '''
+async function api(path, payload) {{
+  const r = await fetch('/api' + path, {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify(payload)
+  }});
+  return r.json();
+}}
+
+async function approve(id) {{
+  const data = await api('/approve', {{item_id: id}});
+  if (data.ok) {{
+    const card = document.querySelector(`article[data-item-id="${{id}}"]`);
+    card.classList.add('approved');
+    card.querySelector('.btn.approve').textContent = '✅ Approved';
+  }}
+  alert(data.ok ? 'Approved — ready to publish' : 'Failed: ' + (data.error || 'unknown'));
+}}
+
+async function skip(id) {{
+  if (!confirm('Skip this draft? It will be moved to the skipped folder.')) return;
+  const data = await api('/skip', {{item_id: id}});
+  if (data.ok) document.querySelector(`article[data-item-id="${{id}}"]`).remove();
+  alert(data.ok ? 'Skipped' : 'Failed: ' + (data.error || 'unknown'));
+}}
+
+function startEdit(id) {{
+  document.getElementById('edit-' + id).style.display = 'block';
+  const preview = document.querySelector(`article[data-item-id="${{id}}"] .preview-shell`);
+  if (preview) preview.style.display = 'none';
+}}
+
+function cancelEdit(id) {{
+  document.getElementById('edit-' + id).style.display = 'none';
+  const preview = document.querySelector(`article[data-item-id="${{id}}"] .preview-shell`);
+  if (preview) preview.style.display = 'block';
+}}
+
+async function saveEdit(id) {{
+  const text = document.getElementById('textarea-' + id).value;
+  const data = await api('/edit', {{item_id: id, linkedin_post: text}});
+  if (data.ok) {{
+    const postEl = document.getElementById('post-' + id);
+    postEl.innerHTML = text.replace(/\n/g, '<br>');
+    cancelEdit(id);
+  }}
+  alert(data.ok ? 'Saved' : 'Failed: ' + (data.error || 'unknown'));
+}}
+
+async function regenerateImage(id) {{
+  if (!confirm('This may wake and run your RunPod ComfyUI pod. Continue?')) return;
+  const btn = event.target;
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = '🔄 Running…';
+  const data = await api('/regenerate-image', {{item_id: id}});
+  btn.disabled = false;
+  btn.textContent = originalText;
+  if (data.ok && data.image_url) {{
+    const card = document.querySelector(`article[data-item-id="${{id}}"]`);
+    let box = card.querySelector('.ln-image');
+    const imgHtml = `<div class="ln-image"><img src="${{data.image_url}}" alt="" /></div>`;
+    if (box) box.outerHTML = imgHtml;
+    else {{
+      const hashtags = card.querySelector('.ln-hashtags');
+      if (hashtags) hashtags.insertAdjacentHTML('afterend', imgHtml);
+      else card.querySelector('.ln-post').insertAdjacentHTML('beforeend', imgHtml);
+    }}
+  }}
+  alert(data.ok ? 'Image regenerated' : 'Failed: ' + (data.error || 'unknown'));
 }}
 '''
 

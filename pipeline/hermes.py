@@ -551,7 +551,6 @@ def cmd_draft_today(args) -> int:
     target_date = _date.fromisoformat(date_override) if date_override else None
     plan = day_plan(target_date)
     dry_run = getattr(args, "dry_run", False)
-    with_image = getattr(args, "with_image", False)
     force_comfy = getattr(args, "force_comfy", False)
 
     candidates = list_items(status="worthy", limit=args.limit * 5)
@@ -568,10 +567,11 @@ def cmd_draft_today(args) -> int:
         return 1
 
     queued = 0
+    skip_image = getattr(args, "skip_image", False)
     for item, score in selected:
         draft = draft_item_v2(item, score, day_plan=plan)
 
-        if with_image or force_comfy:
+        if not skip_image:
             img_path = image_for_post(
                 item_url=item.item_url,
                 title=draft.title,
@@ -589,6 +589,8 @@ def cmd_draft_today(args) -> int:
                     save_item(item)
                 except (OSError, RuntimeError):
                     logger.exception("Failed to persist item image_path")
+            else:
+                logger.warning("No image produced for draft %s; review will show placeholder", draft.title)
 
         if dry_run:
             print(f"\n--- DRY-RUN DRAFT ({plan.day_name}, {plan.post_type}) ---")
@@ -887,7 +889,8 @@ def main(argv: list[str] | None = None) -> int:
     p_draft_today.add_argument("--limit", type=int, default=1, help="Number of draft candidates to produce")
     p_draft_today.add_argument("--dry-run", action="store_true", help="Print draft without saving")
     p_draft_today.add_argument("--date", default=None, help="Override date (YYYY-MM-DD) for testing")
-    p_draft_today.add_argument("--with-image", action="store_true", dest="with_image", help="Generate or fetch an image for the draft (OG first, then ComfyUI)")
+    p_draft_today.add_argument("--with-image", action="store_true", default=True, dest="with_image", help="Generate or fetch an image for the draft (OG first, then ComfyUI) [default: on]")
+    p_draft_today.add_argument("--skip-image", action="store_true", dest="skip_image", help="Skip image generation for this run")
     p_draft_today.add_argument("--force-comfy", action="store_true", dest="force_comfy", help="Always generate a fresh ComfyUI image (skips OpenGraph fallback)")
     p_draft_today.set_defaults(func=cmd_draft_today)
 

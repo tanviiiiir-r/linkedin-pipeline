@@ -4,6 +4,7 @@ Defaults to a local Ollama endpoint (OpenAI-compatible server at
 http://127.0.0.1:11434/v1). Optionally uses OpenAI or Anthropic when
 configured via environment variables.
 """
+import json
 import logging
 import os
 
@@ -20,7 +21,8 @@ def _env(key: str, default: str = "") -> str:
 LLM_PROVIDER = _env("LLM_PROVIDER", "ollama").lower()
 LLM_API_KEY = _env("LLM_API_KEY", "")
 LLM_BASE_URL = _env("LLM_BASE_URL", "http://127.0.0.1:11434/v1")
-LLM_MODEL = _env("LLM_MODEL", "kimi-k2.7-code:cloud")
+# Default to a small, widely available Ollama model. Override via LLM_MODEL env var.
+LLM_MODEL = _env("LLM_MODEL", "llama3.2")
 LLM_TIMEOUT = int(_env("LLM_TIMEOUT", "120"))
 
 
@@ -124,7 +126,7 @@ def is_available() -> bool:
         try:
             resp = requests.get(LLM_BASE_URL.rstrip("/") + "/models", timeout=5)
             return resp.status_code == 200
-        except Exception:
+        except requests.exceptions.RequestException:
             logger.debug("Ollama availability check failed", exc_info=True)
             return False
     return False
@@ -161,9 +163,8 @@ def draft_from_summary(title: str, summary: str, source_url: str) -> dict:
         raw = raw.removesuffix("```")
         raw = raw.strip()
     try:
-        import json
         return json.loads(raw)
-    except Exception:
+    except (json.JSONDecodeError, ValueError, TypeError):
         logger.warning("Failed to parse LLM JSON draft; returning raw text fallback", exc_info=True)
         return {
             "linkedin_post": raw,

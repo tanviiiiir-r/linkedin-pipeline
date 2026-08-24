@@ -10,7 +10,7 @@ No API keys for the platforms themselves are stored; Composio holds the OAuth.
 import json
 import logging
 import shutil
-import subprocess
+import subprocess  # nosec B404
 from pathlib import Path
 
 from config.settings import REQUIRE_APPROVAL
@@ -45,7 +45,7 @@ def _run(slug: str, payload: dict, dry_run: bool = False, account: str = "") -> 
     cmd.extend(["-d", json.dumps(payload)])
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603
             cmd,
             capture_output=True,
             text=True,

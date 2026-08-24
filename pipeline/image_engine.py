@@ -265,7 +265,7 @@ def _schedule_stop() -> None:
         time.sleep(PAUSE_AFTER_SECONDS)
         try:
             stop_pod()
-        except Exception:
+        except requests.exceptions.RequestException:
             logger.exception("Failed to stop RunPod pod")
 
     threading.Thread(target=_do_stop, daemon=True).start()
@@ -280,7 +280,7 @@ def _generate_with_comfy(prompt: str, output_path: Path, width: int = 1216, heig
     workflow["6"]["inputs"]["text"] = prompt
     workflow["27"]["inputs"]["width"] = width
     workflow["27"]["inputs"]["height"] = height
-    workflow["25"]["inputs"]["noise_seed"] = random.randint(0, 1_000_000_000_000)
+    workflow["25"]["inputs"]["noise_seed"] = random.Random().randint(0, 1_000_000_000_000)  # nosec B311
 
     # Submit
     submit_resp = requests.post(
@@ -341,7 +341,7 @@ def _fetch_og_image(url: str, output_path: Path) -> Path | None:
         output_path.write_bytes(img_resp.content)
         logger.info("Downloaded OG image: %s", output_path)
         return output_path
-    except Exception:
+    except (requests.exceptions.RequestException, OSError):
         logger.exception("OG image fetch failed for %s", url)
     return None
 
@@ -394,7 +394,7 @@ def image_for_post(
             _wait_for_comfy_init()
         result = _generate_with_comfy(prompt, output_path, width=width, height=height)
         return result
-    except Exception:
+    except (requests.exceptions.RequestException, OSError, RuntimeError):
         logger.exception("ComfyUI generation failed")
         return None
     finally:

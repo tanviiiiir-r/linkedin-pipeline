@@ -1,0 +1,23 @@
+http:
+  routers:
+    linkedin-review:
+      rule: "Host(`review.hermes-agent-xqcr.srv1921473.hstgr.cloud`)"
+      entrypoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      service: linkedin-review
+      middlewares:
+        - linkedin-review-auth
+  services:
+    linkedin-review:
+      loadBalancer:
+        servers:
+          - url: "http://172.18.0.1:8080"
+  middlewares:
+    linkedin-review-auth:
+      basicAuth:
+        users:
+          # Generate with: htpasswd -nb hermes YOUR_PASSWORD | sed 's/\$/$$/g'
+          # Replace the line below with your actual hash.
+          - "hermes:CHANGEME"

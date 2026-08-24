@@ -25,6 +25,7 @@ dev = [
     "pytest-cov>=4.1",
     "responses>=0.24",
     "ruff>=0.1.0",
+    "bandit>=1.7",
 ]
 
 [tool.ruff]
@@ -33,3 +34,12 @@ target-version = "py310"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "bandit>=1.9.4",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "responses>=0.26.2",
+    "ruff>=0.16.4",
+]

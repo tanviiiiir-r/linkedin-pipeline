@@ -41,6 +41,8 @@ from pipeline.publishers.composio import (
     get_composio_twitter_publisher,
 )
 from pipeline.publishers.linkedin import DirectLinkedInPublisher, DryRunPublisher
+from pipeline.review_dashboard import generate_dashboard
+from pipeline.review_server import run_server
 from pipeline.scoring import is_worthy, score_item
 from pipeline.storage import Item, init_db, item_exists, list_items, save_item, update_status
 from pipeline.tokens import clear_tokens, load_tokens, save_tokens
@@ -289,22 +291,22 @@ def cmd_collect(args) -> int:
                     total += collect_github_trending(url_or_query, dry_run=args.dry_run, limit=args.limit)
                 elif source_type == "github-search":
                     total += collect_github_search(url_or_query, dry_run=args.dry_run, limit=args.limit)
-            except Exception:
+            except (RuntimeError, requests.exceptions.RequestException, OSError):
                 logger.exception("Source %s failed", name)
     if not args.skip_reddit:
         try:
             total += collect_reddit(dry_run=args.dry_run, limit_per_sub=args.limit)
-        except Exception:
+        except (RuntimeError, requests.exceptions.RequestException, OSError):
             logger.exception("Reddit collection failed")
     if not args.skip_youtube:
         try:
             total += collect_youtube(dry_run=args.dry_run, limit_per_channel=args.limit)
-        except Exception:
+        except (RuntimeError, requests.exceptions.RequestException, OSError):
             logger.exception("YouTube collection failed")
     if not args.skip_instagram:
         try:
             total += collect_instagram(dry_run=args.dry_run, limit=args.limit)
-        except Exception:
+        except (RuntimeError, requests.exceptions.RequestException, OSError):
             logger.exception("Instagram collection failed")
     print(f"\nCollection complete: {total} new items")
     return 0
@@ -357,25 +359,25 @@ def cmd_daily(args) -> int:
                     collect_total += collect_github_trending(url_or_query, dry_run=args.dry_run, limit=args.collect_limit)
                 elif source_type == "github-search":
                     collect_total += collect_github_search(url_or_query, dry_run=args.dry_run, limit=args.collect_limit)
-            except Exception as e:
+            except (RuntimeError, requests.exceptions.RequestException, OSError) as e:
                 logger.exception("Source %s failed during daily run", name)
                 source_errors.append(f"{name}: {e}")
     if not args.skip_reddit:
         try:
             collect_total += collect_reddit(dry_run=args.dry_run, limit_per_sub=args.collect_limit)
-        except Exception as e:
+        except (RuntimeError, requests.exceptions.RequestException, OSError) as e:
             logger.exception("Reddit collection failed during daily run")
             source_errors.append(f"reddit: {e}")
     if not args.skip_youtube:
         try:
             collect_total += collect_youtube(dry_run=args.dry_run, limit_per_channel=args.collect_limit)
-        except Exception as e:
+        except (RuntimeError, requests.exceptions.RequestException, OSError) as e:
             logger.exception("YouTube collection failed during daily run")
             source_errors.append(f"youtube: {e}")
     if not args.skip_instagram:
         try:
             collect_total += collect_instagram(dry_run=args.dry_run, limit=args.collect_limit)
-        except Exception as e:
+        except (RuntimeError, requests.exceptions.RequestException, OSError) as e:
             logger.exception("Instagram collection failed during daily run")
             source_errors.append(f"instagram: {e}")
     print(f"\nCollection complete: {collect_total} new items")
@@ -482,7 +484,14 @@ def notify_daily_summary(collected: int, worthy: int, drafted: int, newsletter_s
 
 def cmd_score(args) -> int:
     init_db()
-    items = list_items(limit=args.limit)
+    # By default score items that have not been scored yet so repeated runs make progress.
+    status_filter = getattr(args, "status", None) or "raw"
+    if status_filter == "all":
+        status_filter = None
+    items = list_items(status=status_filter, limit=args.limit)
+    # Fallback to any items if no unscored/raw items remain.
+    if not items:
+        items = list_items(limit=args.limit)
     worthy = 0
     for item in items:
         score = score_item(item)
@@ -578,7 +587,7 @@ def cmd_draft_today(args) -> int:
                 item.image_path = str(img_path)
                 try:
                     save_item(item)
-                except Exception:
+                except (OSError, RuntimeError):
                     logger.exception("Failed to persist item image_path")
 
         if dry_run:
@@ -694,7 +703,7 @@ def cmd_linkedin_exchange(args) -> int:
         return 1
     try:
         resp = DirectLinkedInPublisher.exchange_code(args.code)
-    except Exception as e:
+    except (requests.exceptions.RequestException, RuntimeError, OSError) as e:
         logger.exception("LinkedIn token exchange failed")
         print(f"Token exchange failed: {e}", file=sys.stderr)
         return 1
@@ -732,6 +741,34 @@ def cmd_linkedin_status(args) -> int:
 def cmd_linkedin_logout(args) -> int:
     clear_tokens()
     print("LinkedIn tokens cleared.")
+    return 0
+
+
+
+
+def cmd_review_dashboard(args) -> int:
+    """Generate the static review dashboard HTML from pending drafts."""
+    init_db()
+    ensure_dirs()
+    path = generate_dashboard()
+    print(f"Review dashboard generated: {path}")
+    print("Start server with: python run.py review-server")
+    return 0
+
+
+def cmd_review_server(args) -> int:
+    """Start the tiny HTTP review server."""
+    init_db()
+    ensure_dirs()
+    host = getattr(args, "host", "127.0.0.1")
+    port = getattr(args, "port", 8080)
+    if host == "0.0.0.0":  # nosec B104
+        print(
+            "WARNING: review-server binds 0.0.0.0. "
+            "Only expose this behind Traefik/basic-auth or a trusted network.",
+            file=sys.stderr,
+        )
+    run_server(host=host, port=port)
     return 0
 
 
@@ -778,6 +815,12 @@ def main(argv: list[str] | None = None) -> int:
     p_score.add_argument("--limit", type=int, default=100)
     p_score.add_argument("--min-confidence", type=int, default=50)
     p_score.add_argument("--min-signal", type=int, default=40)
+    p_score.add_argument(
+        "--status",
+        default="raw",
+        choices=["raw", "scored", "worthy", "all"],
+        help="Only score items with this status (default: raw). Use 'all' to rescore everything.",
+    )
     p_score.set_defaults(func=cmd_score)
 
     p_draft = sub.add_parser("draft", help="Draft posts for worthy items")
@@ -847,6 +890,14 @@ def main(argv: list[str] | None = None) -> int:
     p_draft_today.add_argument("--with-image", action="store_true", dest="with_image", help="Generate or fetch an image for the draft (OG first, then ComfyUI)")
     p_draft_today.add_argument("--force-comfy", action="store_true", dest="force_comfy", help="Always generate a fresh ComfyUI image (skips OpenGraph fallback)")
     p_draft_today.set_defaults(func=cmd_draft_today)
+
+    p_review_dashboard = sub.add_parser("review-dashboard", help="Generate static HTML review dashboard for pending drafts")
+    p_review_dashboard.set_defaults(func=cmd_review_dashboard)
+
+    p_review_server = sub.add_parser("review-server", help="Start tiny HTTP server for the review dashboard")
+    p_review_server.add_argument("--host", default="127.0.0.1", help="Bind address")
+    p_review_server.add_argument("--port", type=int, default=8080, help="Port")
+    p_review_server.set_defaults(func=cmd_review_server)
 
     args = parser.parse_args(argv)
     if not args.command:

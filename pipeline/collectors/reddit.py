@@ -7,7 +7,7 @@ import hashlib
 import json
 import logging
 import shutil
-import subprocess
+import subprocess  # nosec B404
 from datetime import datetime, timezone
 
 from pipeline.storage import Item, item_exists, save_item
@@ -33,7 +33,7 @@ def _execute(slug: str, payload: dict) -> dict:
     if not binary:
         raise RuntimeError("composio CLI not found on PATH")
     cmd = [binary, "execute", slug, "-d", json.dumps(payload)]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)  # nosec B603
     try:
         data = json.loads(result.stdout) if result.stdout.strip() else {}
     except json.JSONDecodeError:

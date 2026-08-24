@@ -112,7 +112,7 @@ def _supabase_storage() -> Optional["SupabaseStorage"]:
         s = _get_supabase_storage()
         if s and s.is_available():
             return s
-    except Exception:
+    except (ImportError, RuntimeError, OSError):
         logger.exception("Supabase backend unavailable")
     return None
 

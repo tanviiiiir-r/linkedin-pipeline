@@ -50,7 +50,7 @@ class DirectLinkedInPublisher(LinkedInPublisher):
 
     BASE_URL = "https://api.linkedin.com/v2"
     AUTH_URL = "https://www.linkedin.com/oauth/v2/authorization"
-    TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
+    TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"  # nosec B105
 
     def __init__(
         self,
@@ -152,7 +152,7 @@ class DirectLinkedInPublisher(LinkedInPublisher):
                 author_urn or "",
             )
             return True
-        except Exception:
+        except (requests.exceptions.RequestException, RuntimeError, OSError):
             logger.exception("Failed to refresh LinkedIn access token")
             return False
 

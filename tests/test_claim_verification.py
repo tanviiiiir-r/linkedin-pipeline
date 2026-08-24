@@ -79,6 +79,8 @@ def test_verify_claims_fails_on_hallucinated_number():
 
 
 def test_verify_draft_penalizes_hallucinated_claim():
+    from pipeline.storage import init_db
+    init_db()  # Ensure items table exists for load_item inside verify_draft
     draft = _make_draft("Pinterest reported a 94% lift in WAU.")
     result = verify_draft(draft)
     assert result.checks["no_hallucinated_numbers"] is False

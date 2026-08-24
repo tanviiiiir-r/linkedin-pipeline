@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 import requests
 
+from config.settings import QUEUE_DIR
 from pipeline.drafting import Draft, save_draft
 from pipeline.llm_client import draft_from_summary, summarize_text
 from pipeline.scoring import ScoreResult, score_item
@@ -68,7 +69,7 @@ def _fetch_page(video_id: str) -> dict:
                 lang = track.get("languageCode", "")
                 if base and lang.startswith("en"):
                     captions.append(base)
-        except Exception:
+        except (json.JSONDecodeError, ValueError):
             logger.debug("Failed to parse caption track: %s", url, exc_info=True)
 
     return {"title": title, "description": desc, "caption_urls": captions}
@@ -83,7 +84,7 @@ def _fetch_caption_xml(url: str) -> str:
         text = html.unescape(text)
         text = re.sub(r"\s+", " ", text).strip()
         return text
-    except Exception:
+    except requests.exceptions.RequestException:
         logger.warning("Caption XML fetch failed for %s", url, exc_info=True)
         return ""
 
@@ -96,7 +97,7 @@ def _transcript(video_id: str) -> str:
 
         snippets = YouTubeTranscriptApi.get_transcript(video_id, languages=["en", "en-US", "en-GB"])
         return " ".join(s.get("text", "") for s in snippets)
-    except Exception:
+    except (ImportError, Exception):  # nosec B110
         logger.warning("Transcript fetch failed for %s", video_id, exc_info=True)
 
     page = _fetch_page(video_id)
@@ -168,7 +169,8 @@ def draft_from_youtube_url(url: str) -> Draft | None:
     else:
         draft = draft_item(item, score)
 
-    return save_draft(draft, queue_dir=None)
+    save_draft(draft, queue_dir=QUEUE_DIR)
+    return draft
 
 
 def _llm_usable() -> bool:
@@ -181,6 +183,12 @@ def _build_draft_from_llm(item: Item, score: ScoreResult, generated: dict) -> Dr
     from pipeline.drafting import Draft
     from pipeline.topics import hashtags_from_topics
 
+    hashtags = generated.get("hashtags")
+    if isinstance(hashtags, str):
+        hashtags = [t.strip() for t in hashtags.split() if t.strip().startswith("#")]
+    if not hashtags:
+        hashtags = hashtags_from_topics(score.topics or extract_topics(item.raw_content))
+
     return Draft(
         item_id=item.id,
         pillar=score.pillar or "viral_explained",
@@ -192,7 +200,7 @@ def _build_draft_from_llm(item: Item, score: ScoreResult, generated: dict) -> Dr
         short_pill=generated.get("short_pill", ""),
         forward_pill=generated.get("forward_pill", ""),
         narrative_pill=generated.get("narrative_pill", ""),
-        hashtags=generated.get("hashtags") or hashtags_from_topics(score.topics or extract_topics(item.raw_content)),
+        hashtags=hashtags,
     )
 
 

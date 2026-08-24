@@ -25,3 +25,16 @@ __pycache__/
 .vscode/
 .idea/
 core
+
+# uv lockfile (regenerate in CI)
+uv.lock
+
+# Local analysis reports
+REPO_ANALYSIS_*.md
+
+# Local runtime binaries and generated data
+/opt/data/home/.local/bin/cloudflared
+/opt/data/home/.local/bin/traefik
+data/review/
+data/queue/
+data/analysis/

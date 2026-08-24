@@ -36,7 +36,18 @@ Sliced so each milestone ships in one L1 BUILD pass, verified by L4 VERIFY.
 - **Loops:** L1, L3, L4
 - **Skills:** GSD canon + tdd + modular-architecture + production-readiness
 - **Token budget:** 25000
-- **Status:** 🔄 IN PROGRESS
+- **Status:** ✅ DONE
+
+### M2.6 — Hybrid calendar + freshness-first selection
+- **Outcome:** Stale evergreen items stop surfacing; breaking signals are preferred, with planned evergreen fallback and explicit no-strong-signal path.
+- **Phase (GSD):** build
+- **Files / freeze boundary:** `config/settings.py`, `config/calendar.py`, `pipeline/calendar.py`, `pipeline/scoring.py`, `pipeline/freshness.py`, `pipeline/storage.py`, `pipeline/hermes.py`, `mcp_server.py`, tests, `.genesis/checkpoints/M2.6-*`.
+- **Demo command:** `python -m pytest tests/test_calendar.py tests/test_freshness.py -q`
+- **Success criteria:** All tests pass; ruff clean; stale evergreen topics demoted; hybrid fallback returns planned item or no-strong-signal note; L4 approves.
+- **Loops:** L1, L3, L4
+- **Skills:** GSD canon + tdd + modular-architecture + production-readiness
+- **Token budget:** 25000
+- **Status:** ✅ DONE — 2026-08-24
 
 ### M3 — VPS deploy + Hermes integration + live dry-run publish
 - **Outcome:** Repo deployed on Hostinger VPS, Hermes container can reach MCP server, full collect→score→draft→approve→publish dry-run works end-to-end.

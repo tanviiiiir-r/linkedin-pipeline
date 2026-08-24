@@ -110,21 +110,26 @@ def _best_pillar(text: str, topics: list[str]) -> tuple[str | None, int]:
     text_lower = text.lower()
 
     # Tool Drop: specific tools/APIs/frameworks/releases
-    tool_signals = ["tool", "api", "framework", "library", "sdk", "plugin", "release", "launched", "open source"]
+    tool_signals = ["tool", "api", "framework", "library", "sdk", "plugin", "release", "launched", "open source", "cli"]
     scores["tool_drop"] = sum(15 for s in tool_signals if s in text_lower)
-    if any(t in {"ai-devtools", "mcp", "coding-agents"} for t in topics):
+    if any(t in {"ai-devtools", "coding-agents"} for t in topics):
         scores["tool_drop"] += 25
+    # Generic signal words give a small baseline so clearly topical items clear the gate
+    if "new" in text_lower:
+        scores["tool_drop"] += 5
 
     # Viral Explained: trending launch/demo/explainer
-    viral_signals = ["demo", "explained", "new model", "released", "announced", "watch"]
+    viral_signals = ["demo", "explained", "new model", "released", "announced", "watch", "trending"]
     scores["viral_explained"] = sum(15 for s in viral_signals if s in text_lower)
     if "new-model" in topics or "multimodal" in topics:
         scores["viral_explained"] += 25
+    if "new" in text_lower:
+        scores["viral_explained"] += 5
 
     # Pattern Spotting: connects signals/workflow/shift
-    pattern_signals = ["pattern", "workflow", "shift", "trend", "move toward", "convergence"]
+    pattern_signals = ["pattern", "workflow", "shift", "trend", "move toward", "convergence", "orchestration", "projects now", "combine"]
     scores["pattern_spotting"] = sum(15 for s in pattern_signals if s in text_lower)
-    if any(t in {"agent-orchestration", "llmops", "mlops"} for t in topics):
+    if any(t in {"agent-orchestration", "llmops", "mlops", "ai-agents", "ai-infrastructure"} for t in topics):
         scores["pattern_spotting"] += 25
 
     # Builder Memo: practical, tutorial, cost, performance, build/deploy
@@ -137,6 +142,17 @@ def _best_pillar(text: str, topics: list[str]) -> tuple[str | None, int]:
     future_signals = ["prediction", "future", "next", "what if", "could", "will change"]
     scores["tomorrow_in_ai"] = sum(15 for s in future_signals if s in text_lower)
 
+    # Founder signal: GTM, pricing, moat, wedge, market timing
+    founder_signals = [
+        "founder", "startup", "go-to-market", "gtm", "pricing", "unit economics",
+        "moat", "wedge", "product-market fit", "pmf", "distribution",
+        "market timing", "runway", "burn rate", "bootstrapped", "traction", "mvp",
+        "indie hacker",
+    ]
+    scores["founder_signal"] = sum(15 for s in founder_signals if s in text_lower)
+    if "wedge" in text_lower or "gtm" in text_lower or "moat" in text_lower:
+        scores["founder_signal"] += 25
+
     # Security override: if strong security topics, boost pattern_spotting or builder_memo
     security_topics = {
         "agent-security", "prompt-injection", "model-security", "ai-red-teaming",
@@ -146,7 +162,7 @@ def _best_pillar(text: str, topics: list[str]) -> tuple[str | None, int]:
         scores["builder_memo"] = max(scores.get("builder_memo", 0), 60)
 
     best = max(scores, key=scores.get)
-    return (best, min(scores[best], 100)) if scores[best] >= 30 else (None, 0)
+    return (best, min(scores[best], 100)) if scores[best] >= 25 else (None, 0)
 
 
 def _signal_strength(item: Item, text: str, topics: list[str]) -> int:

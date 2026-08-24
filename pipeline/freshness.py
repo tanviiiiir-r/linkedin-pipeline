@@ -107,6 +107,16 @@ def engagement_score(item: Item) -> int:
         else:
             score -= 10
 
+    # Generic engagement fallback: any item with explicit engagement metadata gets a small boost
+    # proportional to score and comments, capped modestly so source-specific rules dominate.
+    generic_score = e.get("score", 0)
+    generic_comments = e.get("comments", 0)
+    if generic_score or generic_comments:
+        boost = min(25, (generic_score // 20) + (generic_comments // 10))
+        # Only apply if it represents meaningful discussion
+        if generic_comments >= 5 or generic_score >= 50:
+            score += boost
+
     return score
 
 

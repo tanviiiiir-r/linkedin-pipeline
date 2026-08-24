@@ -266,7 +266,12 @@ def draft_today(limit: int = 1, dry_run: bool = False) -> str:
     if not candidates:
         return json.dumps({"ok": False, "error": "No items available. Run collect and score first."}, indent=2)
 
-    selected = select_for_today(candidates, limit=limit)
+    selected, note = select_for_today(candidates, limit=limit)
+    if not selected:
+        return json.dumps(
+            {"ok": False, "error": f"No strong signal for {plan.day_name} ({plan.post_type}). Run collect/plan-content or provide a manual item.", "note": note},
+            indent=2,
+        )
     drafts = []
     for item, score in selected:
         draft = draft_item_v2(item, score, day_plan=plan)

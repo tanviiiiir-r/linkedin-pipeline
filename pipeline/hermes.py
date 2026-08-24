@@ -590,9 +590,13 @@ def cmd_draft_today(args) -> int:
         print("No items to draft. Run `collect` and `score` first.")
         return 1
 
-    selected = select_for_today(candidates, limit=args.limit, for_date=target_date)
+    selected, note = select_for_today(candidates, limit=args.limit, for_date=target_date)
     if not selected:
-        print(f"No item matched today's plan ({plan.post_type}: {plan.job}).")
+        if note == "no_strong_signal":
+            print(f"No strong signal for {plan.day_name} ({plan.post_type}: {plan.job}).")
+            print("Options: run `plan-content` to seed a planned item, or provide a manual item.")
+        else:
+            print(f"No item matched today's plan ({plan.post_type}: {plan.job}).")
         return 1
 
     queued = 0

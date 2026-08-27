@@ -1,6 +1,6 @@
 #!/bin/bash
-# Deploy linkedin-pipeline review dashboard Traefik config
-# Usage: update TRAEFIK_DIR and RELOAD_CMD, then run as root on host.
+# Deploy linkedin-pipeline review dashboard Traefik config on the host
+# Usage: run as root on the host after editing TRAEFIK_DIR and RELOAD_CMD.
 
 TRAEFIK_DIR="/etc/traefik"  # <-- change to your Traefik config directory
 RELOAD_CMD="systemctl reload traefik || docker restart traefik"  # <-- change to your reload command

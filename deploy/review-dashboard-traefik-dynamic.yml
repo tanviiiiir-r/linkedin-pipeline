@@ -1,7 +1,7 @@
 http:
   routers:
     linkedin-review:
-      rule: "Host(`review.hermes-agent-xqcr.srv1921473.hstgr.cloud`)"
+      rule: "Host(`review.caraxis.online`)"
       entrypoints:
         - websecure
       tls:

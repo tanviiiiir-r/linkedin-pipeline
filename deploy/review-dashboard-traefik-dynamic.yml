@@ -13,11 +13,9 @@ http:
     linkedin-review:
       loadBalancer:
         servers:
-          - url: "http://172.18.0.1:8080"
+          - url: "http://172.18.0.2:8080"
   middlewares:
     linkedin-review-auth:
       basicAuth:
         users:
-          # Generate with: htpasswd -nb hermes YOUR_PASSWORD | sed 's/\$/$$/g'
-          # Replace the line below with your actual hash.
-          - "hermes:CHANGEME"
+          - "hermes:$$apr1$$IK0wyBCm$$PQf78JyrYc7ESLxOiQzn4."

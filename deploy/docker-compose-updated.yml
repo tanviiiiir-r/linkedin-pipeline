@@ -1,0 +1,47 @@
+services:
+  hermes-agent:
+    image: ghcr.io/hostinger/hvps-hermes-agent:latest
+    restart: unless-stopped
+    ports:
+      - "4860"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}.rule=Host(`${COMPOSE_PROJECT_NAME}.${TRAEFIK_HOST}`)
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}.entrypoints=websecure
+      - traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls.certresolver=letsencrypt
+      - traefik.http.services.${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=4860
+    env_file:
+      - .env
+    volumes:
+      - ./data:/opt/data
+
+  linkedin-review:
+    image: ghcr.io/hostinger/hvps-hermes-agent:latest
+    restart: unless-stopped
+    depends_on:
+      - hermes-agent
+    working_dir: /opt/data/linkedin-pipeline-latest
+    env_file:
+      - .env
+    environment:
+      - LLM_MODEL=kimi-k2.7-code:cloud
+      - REVIEW_PASSWORD=${REVIEW_PASSWORD}
+    volumes:
+      - ./data:/opt/data
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.linkedin-review.rule=Host(`review.caraxis.online`)
+      - traefik.http.routers.linkedin-review.entrypoints=websecure
+      - traefik.http.routers.linkedin-review.tls.certresolver=letsencrypt
+      - traefik.http.routers.linkedin-review.service=linkedin-review
+      - traefik.http.routers.linkedin-review.middlewares=linkedin-review-auth
+      - traefik.http.services.linkedin-review.loadbalancer.server.port=8080
+      - traefik.http.middlewares.linkedin-review-auth.basicauth.users=hermes:$$apr1$$IK0wyBCm$$PQf78JyrYc7ESLxOiQzn4.
+    command:
+      - /opt/data/linkedin-pipeline-latest/.venv/bin/python
+      - run.py
+      - review-server
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"

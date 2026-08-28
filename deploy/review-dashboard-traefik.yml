@@ -2,7 +2,7 @@
 # For the systemd approach, Traefik cannot use Docker labels; use the dynamic file below instead.
 # Example container labels:
 #   traefik.enable=true
-#   traefik.http.routers.linkedin-review.rule=Host(`review.hermes-agent-xqcr.srv1921473.hstgr.cloud`)
+#   traefik.http.routers.linkedin-review.rule=Host(`review.caraxis.online`)
 #   traefik.http.routers.linkedin-review.entrypoints=websecure
 #   traefik.http.routers.linkedin-review.tls.certresolver=letsencrypt
 #   traefik.http.routers.linkedin-review.middlewares=linkedin-review-auth

@@ -1,168 +1,241 @@
-"""Tiny HTTP server for the LinkedIn draft review dashboard.
+"""HTTP server for the LinkedIn draft review dashboard.
 
-Serves static files from data/review/ and provides JSON API endpoints for
-approve / skip / edit / regenerate-image actions.
-
-Run:
-    python run.py review-server --port 8080
+Serves static review assets and provides JSON API endpoints for approving,
+editing, regenerating images, and listing drafts by status.
 """
 from __future__ import annotations
 
 import json
 import logging
 import mimetypes
-import re
 import shutil
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from config.calendar import day_plan
 from config.settings import QUEUE_DIR, REVIEW_DIR, ensure_dirs
-from pipeline.approval import approve_draft, edit_draft, skip_draft
+from pipeline.approval import (
+    approve_draft,
+    cleanup_rejected,
+    edit_draft,
+    list_approved,
+    list_pending,
+    list_rejected,
+    skip_draft,
+)
 from pipeline.content_analyst import analyze_queued_items
-from pipeline.drafting import Draft, _draft_markdown, _parse_draft_markdown, load_drafts
+from pipeline.drafting import Draft, _draft_markdown, _parse_draft_markdown
 from pipeline.image_engine import IMAGE_DIR, image_for_post
 from pipeline.llm_client import chat, is_available
 from pipeline.storage import load_item, save_item
 
 logger = logging.getLogger(__name__)
 
-API_PREFIX = "/api"
+ensure_dirs()
 REVIEW_IMAGES_DIR = REVIEW_DIR / "images"
-REVIEW_SKIPPED_DIR = QUEUE_DIR / "skipped"
+API_PREFIX = "/api"
+AUTH_HEADER_PREFIX = "Basic "
 
 
-def _json_response(handler, status: int, data: dict) -> None:
+def _require_auth(handler: BaseHTTPRequestHandler) -> bool:
+    """Basic auth check using REVIEW_PASSWORD env var."""
+    password = (os.environ.get("REVIEW_PASSWORD") or "").strip()
+    if not password:
+        return True  # no password configured = open (not recommended)
+    auth = handler.headers.get("Authorization", "")
+    if not auth.startswith(AUTH_HEADER_PREFIX):
+        handler.send_response(401)
+        handler.send_header("WWW-Authenticate", 'Basic realm="Review"')
+        handler.end_headers()
+        return False
+    import base64
+
+    try:
+        decoded = base64.b64decode(auth[len(AUTH_HEADER_PREFIX) :]).decode("utf-8")
+        _, provided = decoded.split(":", 1)
+    except Exception:
+        provided = ""
+    if provided != password:
+        handler.send_response(401)
+        handler.send_header("WWW-Authenticate", 'Basic realm="Review"')
+        handler.end_headers()
+        return False
+    return True
+
+
+def _read_json(handler: BaseHTTPRequestHandler) -> dict:
+    length = int(handler.headers.get("Content-Length", 0))
+    if not length:
+        return {}
+    try:
+        return json.loads(handler.rfile.read(length).decode("utf-8")) or {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _json_response(handler: BaseHTTPRequestHandler, code: int, data: dict) -> None:
     body = json.dumps(data).encode("utf-8")
-    handler.send_response(status)
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_response(code)
+    handler.send_header("Content-Type", "application/json")
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
 
 
-def _read_json(handler) -> dict:
-    length = int(handler.headers.get("Content-Length", 0))
-    if length == 0:
-        return {}
-    raw = handler.rfile.read(length).decode("utf-8")
+def _copy_image_for_review(image_path: str, item_id: str) -> str | None:
+    if not image_path:
+        return None
+    src = Path(image_path)
+    if not src.exists():
+        return None
+    ext = src.suffix or ".png"
+    dest = REVIEW_IMAGES_DIR / f"{item_id}{ext}"
+    dest.parent.mkdir(parents=True, exist_ok=True)
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
+        shutil.copy2(src, dest)
+    except OSError:
+        logger.exception("Failed to copy image %s to review dir", src)
+        return None
+    return str(dest.relative_to(REVIEW_DIR))
 
 
+def _draft_to_json(draft: Draft, analysis: dict | None = None, status: str = "pending") -> dict:
+    image_rel = _copy_image_for_review(draft.image_path, draft.item_id)
+    candidates_rel: list[str] = []
+    for cand in draft.image_candidates or []:
+        cand_path = Path(cand)
+        if cand_path.is_absolute() and cand_path.exists():
+            ext = cand_path.suffix or ".jpg"
+            dest = REVIEW_IMAGES_DIR / f"{draft.item_id}_cand_{len(candidates_rel)}{ext}"
+            REVIEW_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.copy2(cand_path, dest)
+            except OSError:
+                continue
+            candidates_rel.append(str(dest.relative_to(REVIEW_DIR)))
+        elif (REVIEW_DIR / cand).exists():
+            candidates_rel.append(cand)
 
-def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")[:60]
+    out = {
+        "item_id": draft.item_id,
+        "title": draft.title,
+        "pillar": draft.pillar,
+        "source_url": draft.source_url,
+        "linkedin_post": draft.linkedin_post,
+        "hashtags": draft.hashtags,
+        "image_url": f"/{image_rel}" if image_rel else None,
+        "image_source": draft.image_source,
+        "image_candidates": candidates_rel,
+        "created_at": draft.created_at,
+        "approved_at": draft.approved_at,
+        "status": status,
+        "analysis": analysis or {},
+    }
+    return out
 
-
-def _draft_path(item_id: str) -> Path | None:
-    for p in sorted(QUEUE_DIR.glob("*.md"), reverse=True):
-        text = p.read_text()
-        draft = _parse_draft_markdown(text)
-        if draft and draft.item_id == item_id:
-            return p
-    return None
-
-
-def _persist_draft(draft: Draft, path: Path) -> None:
-    backup = path.with_suffix(".md.bak")
-    backup.write_text(path.read_text())
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(_draft_markdown(draft))
-    tmp.replace(path)
 
 class _Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         logger.info("%s - " + fmt, self.address_string(), *args)
 
-    def do_GET(self) -> None:
+    def do_HEAD(self) -> None:
+        if not _require_auth(self):
+            return
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
         if path == "/":
             path = "/index.html"
-
         if path.startswith("/api/"):
-            self._handle_api_get(path)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
             return
-
-        # Static file serving from REVIEW_DIR
         safe_root = REVIEW_DIR.resolve()
         file_path = (safe_root / path.lstrip("/")).resolve()
-        if not str(file_path).startswith(str(safe_root)):
-            self.send_error(403, "Forbidden")
-            return
-        if not file_path.exists() or file_path.is_dir():
+        if not str(file_path).startswith(str(safe_root)) or not file_path.exists() or file_path.is_dir():
             self.send_error(404, "Not found")
             return
-        self._serve_file(file_path)
-
-    def _serve_file(self, file_path: Path) -> None:
         mime, _ = mimetypes.guess_type(str(file_path))
         mime = mime or "application/octet-stream"
-        data = file_path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", mime)
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Length", str(file_path.stat().st_size))
         self.end_headers()
-        self.wfile.write(data)
 
-    def _handle_api_get(self, path: str) -> None:
+    def do_GET(self) -> None:
+        if not _require_auth(self):
+            return
+        parsed = urlparse(self.path)
+        path = unquote(parsed.path)
+        query = parse_qs(parsed.query)
+
+        if path == "/" or path == "/index.html":
+            _serve_static(self, REVIEW_DIR / "index.html")
+            return
+
+        if path.startswith("/api"):
+            self._handle_api_get(path, query)
+            return
+
+        _serve_static(self, REVIEW_DIR / path.lstrip("/"))
+
+    def _handle_api_get(self, path: str, query: dict) -> None:
         if path == "/api/drafts":
-            pending = [d for d in load_drafts(QUEUE_DIR) if not d.approved and not d.published]
-            analysis = analyze_queued_items(limit=50)
-            analysis_by_id = {r.item_id: r for r in analysis}
-            # Pagination via query string (e.g. /api/drafts?offset=2)
-            query = urlparse(self.path).query
-            offset_match = re.search(r"(?:^|&)offset=(\d+)", query)
-            offset = int(offset_match.group(1)) if offset_match else 0
-            total = len(pending)
-            page = pending[offset:] if offset < total else []
-            out = []
-            for draft in page:
-                a = analysis_by_id.get(draft.item_id)
-                # Resolve candidate URLs relative to review dir
-                candidates = []
-                for cand in draft.image_candidates or []:
-                    cand_path = Path(cand)
-                    if cand_path.exists():
-                        try:
-                            rel = cand_path.relative_to(REVIEW_DIR)
-                            candidates.append(f"/{rel.as_posix()}")
-                        except ValueError:
-                            candidates.append(cand)
-                    else:
-                        candidates.append(cand)
-                out.append({
-                    "item_id": draft.item_id,
-                    "title": draft.title,
-                    "pillar": draft.pillar,
-                    "source_url": draft.source_url,
-                    "image_path": draft.image_path,
-                    "image_source": draft.image_source,
-                    "image_candidates": candidates,
-                    "linkedin_post": draft.linkedin_post,
-                    "hashtags": draft.hashtags,
-                    "analysis": {
-                        "relevance_score": a.relevance_score if a else 0,
-                        "accuracy_score": a.accuracy_score if a else 0,
-                        "perfection_score": a.perfection_score if a else 0,
-                        "issues": a.issues if a else [],
-                        "proposed_action": a.proposed_action if a else "—",
-                    } if a else None,
-                })
-            _json_response(self, 200, {
-                "ok": True,
-                "total": total,
-                "offset": offset,
-                "drafts": out,
-            })
+            self._api_drafts(query)
             return
         _json_response(self, 404, {"ok": False, "error": "Unknown endpoint"})
 
+    def _api_drafts(self, query: dict) -> None:
+        status = (query.get("status") or ["pending"])[0].lower()
+        offset = int((query.get("offset") or ["0"])[0])
+        limit = int((query.get("limit") or ["50"])[0])
+
+        if status == "pending":
+            drafts = list_pending()
+            status_label = "pending"
+        elif status == "approved":
+            drafts = list_approved()
+            status_label = "approved"
+        elif status == "rejected":
+            drafts = list_rejected()
+            status_label = "rejected"
+        else:
+            _json_response(self, 400, {"ok": False, "error": "status must be pending, approved, or rejected"})
+            return
+
+        analysis_map = {}
+        if status == "pending":
+            try:
+                for r in analyze_queued_items(limit=100):
+                    analysis_map[r.item_id] = {
+                        "relevance_score": r.relevance_score,
+                        "accuracy_score": r.accuracy_score,
+                        "perfection_score": r.perfection_score,
+                        "issues": r.issues,
+                        "proposed_action": r.proposed_action,
+                    }
+            except Exception:
+                logger.exception("Analysis failed for dashboard")
+
+        total = len(drafts)
+        page = drafts[offset : offset + limit]
+        out = [_draft_to_json(d, analysis_map.get(d.item_id), status=status_label) for d in page]
+        _json_response(
+            self,
+            200,
+            {
+                "ok": True,
+                "total": total,
+                "offset": offset,
+                "limit": limit,
+                "drafts": out,
+            },
+        )
+
     def do_POST(self) -> None:
+        if not _require_auth(self):
+            return
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
         if not path.startswith(API_PREFIX + "/"):
@@ -201,32 +274,18 @@ class _Handler(BaseHTTPRequestHandler):
         if not item_id:
             _json_response(self, 400, {"ok": False, "error": "missing item_id"})
             return
-        ok = skip_draft(item_id, skipped_dir=REVIEW_SKIPPED_DIR)
+        ok = skip_draft(item_id)
         _json_response(self, 200 if ok else 404, {"ok": ok, "item_id": item_id})
 
     def _do_reject(self, payload: dict) -> None:
-        """Reject a draft with feedback; moves it to skipped folder and stores reason."""
+        """Reject a draft with optional feedback; moves it to skipped folder."""
         item_id = payload.get("item_id", "").strip()
         feedback = payload.get("feedback", "").strip()
         if not item_id:
             _json_response(self, 400, {"ok": False, "error": "missing item_id"})
             return
-        path = _draft_path(item_id)
-        if not path:
-            _json_response(self, 404, {"ok": False, "error": "draft not found"})
-            return
-        draft = _parse_draft_markdown(path.read_text())
-        if not draft:
-            _json_response(self, 500, {"ok": False, "error": "could not parse draft"})
-            return
-        draft.published = False
-        draft.approved = False
-        # Append feedback to newsletter section for future review
-        if feedback:
-            draft.newsletter_section += f"\n\n**Rejection feedback:** {feedback}"
-        _persist_draft(draft, path)
-        ok = skip_draft(item_id, skipped_dir=REVIEW_SKIPPED_DIR)
-        _json_response(self, 200 if ok else 500, {"ok": ok, "item_id": item_id})
+        ok = skip_draft(item_id, feedback=feedback)
+        _json_response(self, 200 if ok else 404, {"ok": ok, "item_id": item_id})
 
     def _do_edit(self, payload: dict) -> None:
         item_id = payload.get("item_id", "").strip()
@@ -251,7 +310,7 @@ class _Handler(BaseHTTPRequestHandler):
             _json_response(self, 503, {"ok": False, "error": "LLM not available"})
             return
 
-        path = _draft_path(item_id)
+        path = _find_draft_path(item_id)
         if not path:
             _json_response(self, 404, {"ok": False, "error": "draft not found"})
             return
@@ -287,7 +346,7 @@ Return ONLY the rewritten LinkedIn post text (no markdown, no JSON, no explanati
         if not item_id or not candidate:
             _json_response(self, 400, {"ok": False, "error": "missing item_id or candidate"})
             return
-        path = _draft_path(item_id)
+        path = _find_draft_path(item_id)
         if not path:
             _json_response(self, 404, {"ok": False, "error": "draft not found"})
             return
@@ -297,7 +356,7 @@ Return ONLY the rewritten LinkedIn post text (no markdown, no JSON, no explanati
             return
         candidate_path = Path(candidate)
         if not candidate_path.is_absolute():
-            candidate_path = Path.cwd() / candidate_path
+            candidate_path = REVIEW_DIR / candidate_path
         if not candidate_path.exists():
             _json_response(self, 404, {"ok": False, "error": "candidate file not found"})
             return
@@ -324,18 +383,13 @@ Return ONLY the rewritten LinkedIn post text (no markdown, no JSON, no explanati
         _json_response(self, 200, {"ok": True, "item_id": item_id, "image_path": str(dest), "image_url": f"/{rel}"})
 
     def _do_regenerate_image(self, payload: dict) -> None:
+        """Regenerate image via image engine (RunPod/FLUX fallback)."""
         item_id = payload.get("item_id", "").strip()
         if not item_id:
             _json_response(self, 400, {"ok": False, "error": "missing item_id"})
             return
 
-        path = None
-        for p in sorted(QUEUE_DIR.glob("*.md"), reverse=True):
-            text = p.read_text()
-            draft = _parse_draft_markdown(text)
-            if draft and draft.item_id == item_id:
-                path = p
-                break
+        path = _find_draft_path(item_id)
         if not path:
             _json_response(self, 404, {"ok": False, "error": "draft not found"})
             return
@@ -371,7 +425,6 @@ Return ONLY the rewritten LinkedIn post text (no markdown, no JSON, no explanati
             _json_response(self, 500, {"ok": False, "error": "no image returned"})
             return
 
-        # Persist image path on draft and item
         draft.image_path = str(img_path)
         draft.image_source = img_source
         item.image_path = str(img_path)
@@ -381,11 +434,7 @@ Return ONLY the rewritten LinkedIn post text (no markdown, no JSON, no explanati
         except (OSError, RuntimeError):
             logger.exception("Failed to persist item image_path")
 
-        backup = path.with_suffix(".md.bak")
-        backup.write_text(path.read_text())
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(_draft_markdown(draft))
-        tmp.replace(path)
+        _persist_draft(draft, path)
 
         # Copy into review images dir for the dashboard preview
         ext = img_path.suffix or ".png"
@@ -400,6 +449,44 @@ Return ONLY the rewritten LinkedIn post text (no markdown, no JSON, no explanati
         _json_response(self, 200, {"ok": True, "item_id": item_id, "image_url": f"/{rel}"})
 
 
+def _find_draft_path(item_id: str) -> Path | None:
+    for path in sorted(QUEUE_DIR.glob("*.md"), reverse=True):
+        text = path.read_text()
+        draft = _parse_draft_markdown(text)
+        if draft and draft.item_id == item_id:
+            return path
+    return None
+
+
+def _slug(title: str) -> str:
+    import re
+    s = title.lower().strip()
+    s = re.sub(r"[^\w]+", "-", s)
+    return s.strip("-")[:60] or "image"
+
+
+def _persist_draft(draft: Draft, path: Path) -> None:
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(_draft_markdown(draft))
+    tmp.replace(path)
+
+
+def _serve_static(handler: BaseHTTPRequestHandler, file_path: Path) -> None:
+    safe_root = REVIEW_DIR.resolve()
+    resolved = file_path.resolve()
+    if not str(resolved).startswith(str(safe_root)) or not resolved.exists() or resolved.is_dir():
+        handler.send_error(404, "Not found")
+        return
+    mime, _ = mimetypes.guess_type(str(resolved))
+    mime = mime or "application/octet-stream"
+    data = resolved.read_bytes()
+    handler.send_response(200)
+    handler.send_header("Content-Type", mime)
+    handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers()
+    handler.wfile.write(data)
+
+
 def run_server(host: str = "127.0.0.1", port: int = 8080) -> None:
     ensure_dirs()
     server = HTTPServer((host, port), _Handler)
@@ -410,6 +497,9 @@ def run_server(host: str = "127.0.0.1", port: int = 8080) -> None:
     except KeyboardInterrupt:
         print("\nShutting down review server.")
         server.shutdown()
+
+
+import os
 
 if __name__ == "__main__":
     run_server()

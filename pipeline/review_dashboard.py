@@ -56,133 +56,10 @@ def _score_color(score: int) -> str:
     return "bad"
 
 
-def _link_preview(draft: Draft, image_rel: str | None) -> str:
-    """Render a LinkedIn-style link preview card when no image is provided."""
-    if image_rel:
-        return f'''
-      <div class="ln-image">
-        <img src="images/{html.escape(Path(image_rel).name)}" alt="" loading="lazy" />
-      </div>'''
-    from urllib.parse import urlparse
-    try:
-        domain = urlparse(draft.source_url).netloc.replace("www.", "")
-    except ValueError as exc:
-        logger.warning("Could not parse source URL for link preview: %s", exc)
-        domain = "Source"
-    if not domain:
-        domain = "Source"
-    return f'''
-      <a class="ln-link-card" href="{html.escape(draft.source_url)}" target="_blank" rel="noopener">
-        <div class="ln-link-placeholder">
-          <div class="ln-link-icon">🔗</div>
-          <div class="ln-link-title">{html.escape(draft.title[:90])}</div>
-        </div>
-        <div class="ln-link-domain">{html.escape(domain)}</div>
-      </a>'''
-
-
-def _format_post_body(text: str) -> str:
-    """Format the LinkedIn post body for preview: keep line breaks, bold bullet-like markers."""
-    text = html.escape(text)
-    text = text.replace("\n", "<br />")
-    # Highlight leading bullets
-    text = re_sub_bullets(text)
-    return text
-
-
-def re_sub_bullets(text: str) -> str:
-    import re
-    return re.sub(r"(^|<br /\u003e)([•·\-\*])\s+", r"\1\2 ", text)
-
-
-def _draft_card(draft: Draft, analysis: dict | None, image_rel: str | None) -> str:
-    title_escaped = html.escape(draft.title)
-    body_html = _format_post_body(draft.linkedin_post)
-    hashtags = " ".join(f"<span>{html.escape(t)}</span>" for t in draft.hashtags)
-    rel = analysis or {}
-    rel_score = rel.get("relevance_score", 0)
-    acc_score = rel.get("accuracy_score", 0)
-    perf_score = rel.get("perfection_score", 0)
-    issues = rel.get("issues", [])
-    action = rel.get("proposed_action", "—")
-    plan = day_plan()
-
-    issues_html = ""
-    if issues:
-        issues_html = "\n".join(f"        <li>{html.escape(str(i))}</li>" for i in issues)
-        issues_html = f"      <ul class=\"issues\"\u003e\n{issues_html}\n      </ul\u003e"
-
-    linkedin_preview = f'''
-    <div class="ln-post minimal">
-      <div class="ln-body" id="post-{html.escape(draft.item_id)}">{body_html}</div>
-      <div class="ln-hashtags">{hashtags}</div>
-{_link_preview(draft, image_rel)}
-    </div>'''
-
-    return f'''
-    <article class="draft-card" data-item-id="{html.escape(draft.item_id)}" data-pillar="{html.escape(draft.pillar)}">
-      <div class="card-meta">
-        <div class="left">
-          <span class="day-badge">{html.escape(plan.day_name)}</span>
-          <span class="pillar">{html.escape(draft.pillar.replace('_', ' ').title())}</span>
-          <span class="item-id">#{html.escape(draft.item_id[:8])}</span>
-        </div>
-        <a class="source-link" href="{html.escape(draft.source_url)}" target="_blank" rel="noopener">Source →</a>
-      </div>
-      <h2 class="draft-title">{title_escaped}</h2>
-
-      <div class="preview-shell">
-        <div class="preview-label">LinkedIn preview</div>
-{linkedin_preview}
-      </div>
-
-      <div class="quality-card">
-        <div class="score-row">
-          <span>Relevance</span>
-          <span class="score {_score_color(rel_score)}">{rel_score}/100 <span class="bar">{_bar(rel_score)}</span></span>
-        </div>
-        <div class="score-row">
-          <span>Accuracy</span>
-          <span class="score {_score_color(acc_score)}">{acc_score}/100 <span class="bar">{_bar(acc_score)}</span></span>
-        </div>
-        <div class="score-row">
-          <span>Perfection</span>
-          <span class="score {_score_color(perf_score)}">{perf_score}/100 <span class="bar">{_bar(perf_score)}</span></span>
-        </div>
-        <div class="action-line">Proposed action: <strong>{html.escape(action)}</strong></div>
-{issues_html}
-      </div>
-
-      <div class="actions">
-        <button class="btn approve" onclick="approve('{html.escape(draft.item_id)}')">✅ Approve</button>
-        <button class="btn edit" onclick="startEdit('{html.escape(draft.item_id)}')">✏️ Edit</button>
-        <button class="btn image" onclick="regenerateImage('{html.escape(draft.item_id)}')">🔄 Regenerate image</button>
-        <button class="btn skip" onclick="skip('{html.escape(draft.item_id)}')">⏭ Skip</button>
-      </div>
-
-      <div class="edit-box" id="edit-{html.escape(draft.item_id)}" style="display:none;">
-        <textarea id="textarea-{html.escape(draft.item_id)}" rows="12">{html.escape(draft.linkedin_post)}</textarea>
-        <div class="edit-actions">
-          <button class="btn save" onclick="saveEdit('{html.escape(draft.item_id)}')">💾 Save</button>
-          <button class="btn cancel" onclick="cancelEdit('{html.escape(draft.item_id)}')">Cancel</button>
-        </div>
-      </div>
-    </article>'''
-
-
 def _bar(score: int) -> str:
     filled = round(score / 10)
     empty = 10 - filled
     return "█" * filled + "░" * empty
-
-
-def _empty_state() -> str:
-    return '''
-    <article class="draft-card empty">
-      <div class="empty-icon">📭</div>
-      <h2>No pending drafts</h2>
-      <p>Run <code>python run.py draft-today --with-image</code> to create one for review.</p>
-    </article>'''
 
 
 def generate_dashboard() -> Path:
@@ -226,7 +103,7 @@ _HTML_TEMPLATE = '''<!DOCTYPE html>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Review — LinkedIn Drafts</title>
-  <link rel="stylesheet" href="assets/style.css" />
+  <link rel="stylesheet" href="assets/style.css?v=3" />
 </head>
 <body>
   <header class="site-header">
@@ -246,15 +123,22 @@ _HTML_TEMPLATE = '''<!DOCTYPE html>
     </div>
   </header>
 
-  <main class="wrap" id="app">
-    <div class="loading">Loading drafts…</div>
+  <main class="wrap">
+    <div class="tabs">
+      <button class="tab active" data-tab="pending" onclick="switchTab('pending')">⏳ Queued</button>
+      <button class="tab" data-tab="approved" onclick="switchTab('approved')">✅ Approved</button>
+      <button class="tab" data-tab="rejected" onclick="switchTab('rejected')">🗑 Rejected</button>
+    </div>
+    <div id="app">
+      <div class="loading">Loading drafts…</div>
+    </div>
   </main>
 
   <footer class="wrap">
     <p class="note">No post is published from this screen. Approve here, then run <code>python run.py publish --dry-run</code>.</p>
   </footer>
 
-  <script src="assets/app.js"></script>
+  <script src="assets/app.js?v=3"></script>
 </body>
 </html>'''
 
@@ -316,28 +200,37 @@ h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
 .today .day { font-size: 14px; font-weight: 600; color: var(--accent); }
 .today .pillar { font-size: 13px; color: var(--mut); text-transform: capitalize; }
 .counter { font-size: 12px; color: var(--mut); margin-top: 4px; }
+
+.tabs {
+  display: flex; gap: 8px; margin: 18px 0;
+  border-bottom: 1px solid var(--line); padding-bottom: 8px;
+}
+.tab {
+  background: transparent; color: var(--mut); border: none;
+  padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 14px;
+}
+.tab.active { background: var(--surface); color: var(--txt); }
+.tab:hover { color: var(--txt); }
+
 .loading { text-align: center; padding: 80px 20px; color: var(--mut); }
 .empty { text-align: center; padding: 80px 20px; color: var(--mut); }
 .empty-icon { font-size: 48px; margin-bottom: 12px; }
 
-/* Draft navigator */
-.nav-bar {
-  display: flex; justify-content: space-between; align-items: center;
-  gap: 12px; margin: 18px 0;
+.status-banner {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 16px; margin-bottom: 16px; font-size: 14px; color: var(--mut);
 }
-.nav-bar button {
-  background: var(--surface); color: var(--txt); border: 1px solid var(--line);
-  padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px;
-}
-.nav-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
+.status-banner.running { border-color: var(--accent); color: var(--accent); }
+.status-banner.success { border-color: var(--ok); color: var(--ok); }
+.status-banner.error { border-color: var(--bad); color: var(--bad); }
 
 /* Draft card */
 .draft-card {
   background: var(--card); border: 1px solid var(--line); border-radius: 16px;
   padding: 20px; margin: 18px 0;
 }
-.draft-card.approved { border-color: var(--ok); opacity: 0.8; }
-.draft-card.rejected { border-color: var(--bad); opacity: 0.7; }
+.draft-card.approved { border-color: var(--ok); opacity: 0.9; }
+.draft-card.rejected { border-color: var(--bad); opacity: 0.8; }
 .card-meta {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; margin-bottom: 12px; flex-wrap: wrap;
@@ -349,6 +242,7 @@ h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
 }
 .pillar { color: var(--mut); font-size: 13px; text-transform: capitalize; }
 .item-id { color: var(--mut); font-size: 12px; font-family: ui-monospace, monospace; }
+.approved-at { color: var(--ok); font-size: 12px; }
 .source-link { color: var(--accent); font-size: 13px; text-decoration: none; font-weight: 500; }
 .draft-title { font-size: 19px; font-weight: 600; margin: 0 0 16px; color: var(--txt); }
 
@@ -371,20 +265,28 @@ h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
   aspect-ratio: 1.91 / 1; background: #f3f2ef; overflow: hidden;
 }
 .ln-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ln-link-card {
+  display: block; border-top: 1px solid var(--ln-line); text-decoration: none; color: var(--ln-txt);
+  background: var(--ln-hover);
+}
+.ln-link-placeholder {
+  display: flex; align-items: center; gap: 12px; padding: 14px;
+}
+.ln-link-icon { font-size: 20px; }
+.ln-link-title { font-size: 14px; font-weight: 600; }
+.ln-link-domain { font-size: 12px; color: var(--ln-muted); padding: 0 14px 14px; }
 
-/* Image gallery */
-.image-gallery {
-  margin: 14px 0; border: 1px solid var(--line); border-radius: 12px; padding: 12px;
-  background: var(--surface);
+/* Candidate images */
+.candidate-row { margin: 14px 0; }
+.candidate-label { font-size: 12px; color: var(--mut); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+.candidate-thumbs { display: flex; gap: 10px; flex-wrap: wrap; }
+.candidate-thumb {
+  position: relative; width: 120px; height: 70px; border-radius: 8px; overflow: hidden;
+  border: 2px solid transparent; cursor: pointer; background: var(--surface);
 }
-.gallery-label { font-size: 12px; color: var(--mut); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
-.gallery-thumbs { display: flex; gap: 10px; flex-wrap: wrap; }
-.gallery-thumb {
-  width: 120px; height: 70px; border-radius: 8px; object-fit: cover; cursor: pointer;
-  border: 2px solid transparent; background: var(--card);
-}
-.gallery-thumb:hover { border-color: var(--accent); }
-.gallery-thumb.selected { border-color: var(--ok); }
+.candidate-thumb.active { border-color: var(--ok); }
+.candidate-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.candidate-thumb input { position: absolute; opacity: 0; }
 
 /* Quality card */
 .quality-card {
@@ -407,7 +309,8 @@ h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
   padding: 9px 16px; border-radius: 9px; cursor: pointer; font-size: 14px; font-weight: 500;
   transition: transform 0.05s ease, opacity 0.15s ease;
 }
-.btn:hover { opacity: 0.85; transform: translateY(-1px); }
+.btn:hover:not(:disabled) { opacity: 0.85; transform: translateY(-1px); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn.approve { background: rgba(34,197,94,0.15); color: var(--ok); border-color: rgba(34,197,94,0.35); }
 .btn.edit { background: rgba(96,165,250,0.12); color: var(--accent); border-color: rgba(96,165,250,0.3); }
 .btn.image { background: rgba(168,85,247,0.12); color: #c084fc; border-color: rgba(168,85,247,0.3); }
@@ -416,22 +319,26 @@ h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
 .btn.save { background: rgba(34,197,94,0.15); color: var(--ok); border-color: rgba(34,197,94,0.35); }
 .btn.cancel { background: transparent; color: var(--mut); }
 
-/* Edit panel */
-.edit-panel {
+/* Edit / Agent edit panels */
+.edit-panel, .agent-panel, .reject-panel {
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
   padding: 14px; margin-bottom: 14px;
 }
 .edit-label { font-size: 12px; color: var(--mut); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-.edit-panel textarea {
+.edit-panel textarea, .agent-panel textarea, .reject-panel textarea {
   width: 100%; background: var(--bg); color: var(--txt); border: 1px solid var(--line);
   border-radius: 10px; padding: 12px; font-family: inherit; font-size: 15px;
   line-height: 1.5; resize: vertical;
 }
 .edit-actions { display: flex; gap: 8px; margin-top: 8px; }
 
-/* Reject box */
-.reject-box { display: none; margin-top: 14px; }
-.reject-box.active { display: block; }
+/* Spinner */
+.spinner {
+  display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite;
+  margin-right: 6px; vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 footer { border-top: 1px solid var(--line); margin-top: 32px; padding: 20px 0 48px; }
 .note { color: var(--mut); font-size: 13px; }
@@ -446,78 +353,539 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; ba
 '''
 
 
-_JS = '''
-async function api(path, payload) {
-  const r = await fetch('/api' + path, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(payload)
-  });
-  return r.json();
-}
+_JS = '''(function() {
+  "use strict";
 
-async function approve(id) {
-  const data = await api('/approve', {item_id: id});
-  if (data.ok) {
-    const card = document.querySelector(`article[data-item-id="${id}"]`);
-    card.classList.add('approved');
-    card.querySelector('.btn.approve').textContent = '✅ Approved';
+  let currentTab = "pending";
+
+  async function getApi(path) {
+    const r = await fetch('/api' + path);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
   }
-  alert(data.ok ? 'Approved — ready to publish' : 'Failed: ' + (data.error || 'unknown'));
-}
 
-async function skip(id) {
-  if (!confirm('Skip this draft? It will be moved to the skipped folder.')) return;
-  const data = await api('/skip', {item_id: id});
-  if (data.ok) document.querySelector(`article[data-item-id="${id}"]`).remove();
-  alert(data.ok ? 'Skipped' : 'Failed: ' + (data.error || 'unknown'));
-}
-
-function startEdit(id) {
-  document.getElementById('edit-' + id).style.display = 'block';
-  const preview = document.querySelector(`article[data-item-id="${id}"] .preview-shell`);
-  if (preview) preview.style.display = 'none';
-}
-
-function cancelEdit(id) {
-  document.getElementById('edit-' + id).style.display = 'none';
-  const preview = document.querySelector(`article[data-item-id="${id}"] .preview-shell`);
-  if (preview) preview.style.display = 'block';
-}
-
-async function saveEdit(id) {
-  const text = document.getElementById('textarea-' + id).value;
-  const data = await api('/edit', {item_id: id, linkedin_post: text});
-  if (data.ok) {
-    const postEl = document.getElementById('post-' + id);
-    postEl.innerHTML = text.replace(/\n/g, '<br>');
-    cancelEdit(id);
+  async function postApi(path, payload) {
+    const r = await fetch('/api' + path, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    return data;
   }
-  alert(data.ok ? 'Saved' : 'Failed: ' + (data.error || 'unknown'));
-}
 
-async function regenerateImage(id) {
-  if (!confirm('This may wake and run your RunPod ComfyUI pod. Continue?')) return;
-  const btn = event.target;
-  btn.disabled = true;
-  const originalText = btn.textContent;
-  btn.textContent = '🔄 Running…';
-  const data = await api('/regenerate-image', {item_id: id});
-  btn.disabled = false;
-  btn.textContent = originalText;
-  if (data.ok && data.image_url) {
-    const card = document.querySelector(`article[data-item-id="${id}"]`);
-    let box = card.querySelector('.ln-image');
-    const imgHtml = `<div class="ln-image"><img src="${data.image_url}" alt="" /></div>`;
-    if (box) box.outerHTML = imgHtml;
-    else {
-      const hashtags = card.querySelector('.ln-hashtags');
-      if (hashtags) hashtags.insertAdjacentHTML('afterend', imgHtml);
-      else card.querySelector('.ln-post').insertAdjacentHTML('beforeend', imgHtml);
+  function scoreColor(score) {
+    if (score >= 80) return 'good';
+    if (score >= 60) return 'warn';
+    return 'bad';
+  }
+
+  function scoreBar(score) {
+    const filled = Math.round(score / 10);
+    return '█'.repeat(filled) + '░'.repeat(10 - filled);
+  }
+
+  function activeImageUrl(draft) {
+    if (draft.image_url) return draft.image_url;
+    const m = (draft.image_path || '').match(/(\\.[^.\\/]+)$/);
+    const ext = m ? m[1] : '.jpg';
+    return 'images/' + draft.item_id + ext;
+  }
+
+  function setStatus(html, type) {
+    const app = document.getElementById('app');
+    let banner = app.querySelector('.status-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.className = 'status-banner';
+      app.insertBefore(banner, app.firstChild);
+    }
+    banner.className = 'status-banner ' + (type || '');
+    banner.innerHTML = html;
+  }
+
+  function clearStatus() {
+    const app = document.getElementById('app');
+    const banner = app.querySelector('.status-banner');
+    if (banner) banner.remove();
+  }
+
+  function renderCandidates(draft) {
+    const candidates = (draft.image_candidates || []).filter(c => c.startsWith('images/'));
+    if (!candidates.length) return null;
+    const wrap = document.createElement('div');
+    wrap.className = 'candidate-row';
+    const label = document.createElement('div');
+    label.className = 'candidate-label';
+    label.textContent = 'Choose image';
+    wrap.appendChild(label);
+    const thumbs = document.createElement('div');
+    thumbs.className = 'candidate-thumbs';
+    const active = activeImageUrl(draft);
+    candidates.forEach(c => {
+      const lbl = document.createElement('label');
+      lbl.className = 'candidate-thumb' + (c === active ? ' active' : '');
+      lbl.title = c;
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = 'img-' + draft.item_id;
+      input.value = c;
+      if (c === active) input.checked = true;
+      input.onchange = () => selectImage(draft.item_id, c);
+      const img = document.createElement('img');
+      img.src = c;
+      img.alt = '';
+      img.loading = 'lazy';
+      lbl.appendChild(input);
+      lbl.appendChild(img);
+      thumbs.appendChild(lbl);
+    });
+    wrap.appendChild(thumbs);
+    return wrap;
+  }
+
+  function renderDraft(draft) {
+    const a = draft.analysis || {};
+    const rel = a.relevance_score || 0;
+    const acc = a.accuracy_score || 0;
+    const perf = a.perfection_score || 0;
+
+    const article = document.createElement('article');
+    article.className = 'draft-card';
+    if (draft.status === 'approved') article.classList.add('approved');
+    if (draft.status === 'rejected') article.classList.add('rejected');
+    article.dataset.itemId = draft.item_id;
+    article.dataset.pillar = draft.pillar;
+
+    // meta
+    const meta = document.createElement('div');
+    meta.className = 'card-meta';
+    const left = document.createElement('div');
+    left.className = 'left';
+    const dayBadge = document.createElement('span');
+    dayBadge.className = 'day-badge';
+    dayBadge.textContent = draft.day || 'Today';
+    const pillar = document.createElement('span');
+    pillar.className = 'pillar';
+    pillar.textContent = (draft.pillar || '').replace(/_/g, ' ').replace(/\\b\\w/g, m => m.toUpperCase());
+    const itemId = document.createElement('span');
+    itemId.className = 'item-id';
+    itemId.textContent = '#' + draft.item_id.slice(0, 8);
+    left.append(dayBadge, pillar, itemId);
+    if (draft.approved_at) {
+      const approvedAt = document.createElement('span');
+      approvedAt.className = 'approved-at';
+      approvedAt.textContent = 'Approved ' + formatDate(draft.approved_at);
+      left.appendChild(approvedAt);
+    }
+    const source = document.createElement('a');
+    source.className = 'source-link';
+    source.href = draft.source_url;
+    source.target = '_blank';
+    source.rel = 'noopener';
+    source.textContent = 'Source →';
+    meta.append(left, source);
+
+    // title
+    const h2 = document.createElement('h2');
+    h2.className = 'draft-title';
+    h2.textContent = draft.title || '(untitled)';
+
+    // preview
+    const previewShell = document.createElement('div');
+    previewShell.className = 'preview-shell';
+    const previewLabel = document.createElement('div');
+    previewLabel.className = 'preview-label';
+    previewLabel.textContent = 'LinkedIn preview';
+    const lnPost = document.createElement('div');
+    lnPost.className = 'ln-post minimal';
+    const body = document.createElement('div');
+    body.className = 'ln-body';
+    body.id = 'post-' + draft.item_id;
+    body.innerHTML = (draft.linkedin_post || '').replace(/\\n/g, '<br>');
+    const hashtags = document.createElement('div');
+    hashtags.className = 'ln-hashtags';
+    hashtags.textContent = (draft.hashtags || []).join(' ');
+
+    lnPost.append(body, hashtags);
+    const imgUrl = activeImageUrl(draft);
+    if (imgUrl) {
+      const imgBox = document.createElement('div');
+      imgBox.className = 'ln-image';
+      const img = document.createElement('img');
+      img.src = imgUrl;
+      img.alt = '';
+      img.loading = 'lazy';
+      imgBox.appendChild(img);
+      lnPost.appendChild(imgBox);
+    } else {
+      let domain = 'Source';
+      try { domain = new URL(draft.source_url).hostname.replace(/^www\\./, ''); } catch (e) {}
+      const linkCard = document.createElement('a');
+      linkCard.className = 'ln-link-card';
+      linkCard.href = draft.source_url;
+      linkCard.target = '_blank';
+      linkCard.rel = 'noopener';
+      linkCard.innerHTML = `
+        <div class="ln-link-placeholder"><div class="ln-link-icon">🔗</div><div class="ln-link-title">${(draft.title || '').slice(0,90)}</div></div>
+        <div class="ln-link-domain">${domain}</div>`;
+      lnPost.appendChild(linkCard);
+    }
+    previewShell.append(previewLabel, lnPost);
+
+    // candidates
+    const candidatesEl = renderCandidates(draft);
+
+    // quality card (only for pending)
+    let quality = null;
+    if (draft.status === 'pending') {
+      quality = document.createElement('div');
+      quality.className = 'quality-card';
+      [
+        {label: 'Relevance', score: rel},
+        {label: 'Accuracy', score: acc},
+        {label: 'Perfection', score: perf}
+      ].forEach(({label, score}) => {
+        const row = document.createElement('div');
+        row.className = 'score-row';
+        const lab = document.createElement('span');
+        lab.textContent = label;
+        const val = document.createElement('span');
+        val.className = 'score ' + scoreColor(score);
+        val.innerHTML = score + '/100 <span class="bar">' + scoreBar(score) + '</span>';
+        row.append(lab, val);
+        quality.appendChild(row);
+      });
+      const actionLine = document.createElement('div');
+      actionLine.className = 'action-line';
+      actionLine.innerHTML = 'Proposed action: <strong>' + (a.proposed_action || '—') + '</strong>';
+      quality.appendChild(actionLine);
+      (a.issues || []).forEach(issue => {
+        const ul = quality.querySelector('ul.issues') || document.createElement('ul');
+        ul.className = 'issues';
+        const li = document.createElement('li');
+        li.textContent = issue;
+        ul.appendChild(li);
+        quality.appendChild(ul);
+      });
+    }
+
+    // actions
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+    const btn = (cls, text, onClick) => {
+      const b = document.createElement('button');
+      b.className = 'btn ' + cls;
+      b.textContent = text;
+      b.onclick = onClick;
+      return b;
+    };
+
+    if (draft.status === 'pending') {
+      actions.append(
+        btn('approve', '✅ Approve', () => approve(draft.item_id)),
+        btn('edit', '✏️ Edit', () => startEdit(draft.item_id)),
+        btn('image', '🤖 Agent edit', () => startAgentEdit(draft.item_id)),
+        btn('image', '🔄 Regenerate image', () => regenerateImage(draft.item_id)),
+        btn('reject', '🗑 Reject', () => startReject(draft.item_id)),
+        btn('skip', '⏭ Skip', () => skip(draft.item_id))
+      );
+    } else if (draft.status === 'approved') {
+      actions.append(
+        btn('edit', '✏️ Edit', () => startEdit(draft.item_id)),
+        btn('image', '🔄 Regenerate image', () => regenerateImage(draft.item_id))
+      );
+    } else if (draft.status === 'rejected') {
+      actions.append(
+        btn('approve', '✅ Approve', () => approve(draft.item_id)),
+        btn('skip', '🗑 Delete', () => skip(draft.item_id))
+      );
+    }
+
+    // edit box
+    const editBox = document.createElement('div');
+    editBox.className = 'edit-panel';
+    editBox.id = 'edit-' + draft.item_id;
+    editBox.style.display = 'none';
+    const editLabel = document.createElement('div');
+    editLabel.className = 'edit-label';
+    editLabel.textContent = 'Edit LinkedIn post';
+    const textarea = document.createElement('textarea');
+    textarea.id = 'textarea-' + draft.item_id;
+    textarea.rows = 12;
+    textarea.value = draft.linkedin_post || '';
+    const editActions = document.createElement('div');
+    editActions.className = 'edit-actions';
+    editActions.append(
+      btn('save', '💾 Save', () => saveEdit(draft.item_id)),
+      btn('cancel', 'Cancel', () => cancelEdit(draft.item_id))
+    );
+    editBox.append(editLabel, textarea, editActions);
+
+    // agent edit box
+    const agentBox = document.createElement('div');
+    agentBox.className = 'agent-panel';
+    agentBox.id = 'agent-' + draft.item_id;
+    agentBox.style.display = 'none';
+    const agentLabel = document.createElement('div');
+    agentLabel.className = 'edit-label';
+    agentLabel.textContent = 'Tell the AI how to rewrite this';
+    const agentInput = document.createElement('textarea');
+    agentInput.id = 'agent-input-' + draft.item_id;
+    agentInput.rows = 3;
+    agentInput.placeholder = 'e.g. Make it shorter, more technical, add a stronger CTA...';
+    const agentActions = document.createElement('div');
+    agentActions.className = 'edit-actions';
+    agentActions.append(
+      btn('save', '✨ Rewrite', () => agentEdit(draft.item_id)),
+      btn('cancel', 'Cancel', () => cancelAgentEdit(draft.item_id))
+    );
+    agentBox.append(agentLabel, agentInput, agentActions);
+
+    // reject box
+    const rejectBox = document.createElement('div');
+    rejectBox.className = 'reject-panel';
+    rejectBox.id = 'reject-' + draft.item_id;
+    rejectBox.style.display = 'none';
+    const rejectLabel = document.createElement('div');
+    rejectLabel.className = 'edit-label';
+    rejectLabel.textContent = 'Why are you rejecting? (optional)';
+    const rejectInput = document.createElement('textarea');
+    rejectInput.id = 'reject-input-' + draft.item_id;
+    rejectInput.rows = 3;
+    rejectInput.placeholder = 'e.g. Too generic, source is weak, duplicate...';
+    const rejectActions = document.createElement('div');
+    rejectActions.className = 'edit-actions';
+    rejectActions.append(
+      btn('reject', '🗑 Confirm reject', () => rejectDraft(draft.item_id)),
+      btn('cancel', 'Cancel', () => cancelReject(draft.item_id))
+    );
+    rejectBox.append(rejectLabel, rejectInput, rejectActions);
+
+    article.append(meta, h2, previewShell, candidatesEl, quality, actions, editBox, agentBox, rejectBox);
+    return article;
+  }
+
+  function renderEmpty(tab) {
+    const article = document.createElement('article');
+    article.className = 'draft-card empty';
+    const messages = {
+      pending: '<div class="empty-icon">📭</div><h2>No pending drafts</h2><p>Run <code>python run.py draft-today --with-image</code> to create one for review.</p>',
+      approved: '<div class="empty-icon">✅</div><h2>No approved drafts</h2><p>Approve drafts from the Queued tab to see them here.</p>',
+      rejected: '<div class="empty-icon">🗑</div><h2>No rejected drafts</h2><p>Rejected drafts older than 7 days are automatically cleared.</p>'
+    };
+    article.innerHTML = messages[tab] || messages.pending;
+    return article;
+  }
+
+  function formatDate(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString();
+    } catch (e) { return iso; }
+  }
+
+  async function loadDrafts() {
+    const app = document.getElementById('app');
+    app.innerHTML = '<div class="loading">Loading drafts…</div>';
+    try {
+      const data = await getApi('/drafts?status=' + currentTab);
+      if (!data.ok) throw new Error(data.error || 'Failed to load drafts');
+      const drafts = data.drafts || [];
+      const counter = document.getElementById('counter');
+      if (counter) counter.textContent = drafts.length + ' / ' + data.total;
+      app.innerHTML = '';
+      if (!drafts.length) {
+        app.appendChild(renderEmpty(currentTab));
+        return;
+      }
+      drafts.forEach(d => app.appendChild(renderDraft(d)));
+    } catch (err) {
+      app.innerHTML = '';
+      const article = document.createElement('article');
+      article.className = 'draft-card empty';
+      article.innerHTML = '<div class="empty-icon">⚠️</div><h2>Could not load drafts</h2><p>' + err.message + '</p>';
+      app.appendChild(article);
+      console.error(err);
     }
   }
-  alert(data.ok ? 'Image regenerated' : 'Failed: ' + (data.error || 'unknown'));
-}
+
+  function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    loadDrafts();
+  }
+
+  async function approve(id) {
+    try {
+      setStatus('<span class="spinner"></span> Approving…', 'running');
+      const data = await postApi('/approve', {item_id: id});
+      if (data.ok) {
+        if (currentTab === 'pending') {
+          document.querySelector(`article[data-item-id="${id}"]`).remove();
+        } else {
+          await loadDrafts();
+        }
+      }
+      setStatus('Approved — ready to publish', 'success');
+      setTimeout(clearStatus, 2000);
+    } catch (err) {
+      setStatus('Failed: ' + err.message, 'error');
+    }
+  }
+
+  async function skip(id) {
+    if (!confirm('Skip this draft?')) return;
+    try {
+      setStatus('<span class="spinner"></span> Skipping…', 'running');
+      const data = await postApi('/skip', {item_id: id});
+      if (data.ok) {
+        const card = document.querySelector(`article[data-item-id="${id}"]`);
+        if (card) card.remove();
+      }
+      setStatus('Skipped', 'success');
+      setTimeout(clearStatus, 2000);
+    } catch (err) {
+      setStatus('Failed: ' + err.message, 'error');
+    }
+  }
+
+  async function rejectDraft(id) {
+    const feedback = document.getElementById('reject-input-' + id).value.trim();
+    try {
+      setStatus('<span class="spinner"></span> Rejecting…', 'running');
+      const data = await postApi('/reject', {item_id: id, feedback});
+      if (data.ok) {
+        const card = document.querySelector(`article[data-item-id="${id}"]`);
+        if (card) card.remove();
+      }
+      setStatus('Rejected', 'success');
+      setTimeout(clearStatus, 2000);
+    } catch (err) {
+      setStatus('Failed: ' + err.message, 'error');
+    }
+  }
+
+  async function selectImage(id, candidate) {
+    try {
+      setStatus('<span class="spinner"></span> Selecting image…', 'running');
+      await postApi('/select-image', {item_id: id, candidate});
+      await loadDrafts();
+      setStatus('Image selected', 'success');
+      setTimeout(clearStatus, 2000);
+    } catch (err) {
+      setStatus('Failed: ' + err.message, 'error');
+    }
+  }
+
+  function startEdit(id) {
+    document.getElementById('edit-' + id).style.display = 'block';
+    document.getElementById('agent-' + id).style.display = 'none';
+    document.getElementById('reject-' + id).style.display = 'none';
+  }
+
+  function cancelEdit(id) {
+    document.getElementById('edit-' + id).style.display = 'none';
+  }
+
+  async function saveEdit(id) {
+    const text = document.getElementById('textarea-' + id).value;
+    try {
+      setStatus('<span class="spinner"></span> Saving edit…', 'running');
+      await postApi('/edit', {item_id: id, linkedin_post: text});
+      document.getElementById('post-' + id).innerHTML = (text || '').replace(/\\n/g, '<br>');
+      cancelEdit(id);
+      setStatus('Edit saved', 'success');
+      setTimeout(clearStatus, 2000);
+    } catch (err) {
+      setStatus('Failed: ' + err.message, 'error');
+    }
+  }
+
+  function startAgentEdit(id) {
+    document.getElementById('agent-' + id).style.display = 'block';
+    document.getElementById('edit-' + id).style.display = 'none';
+    document.getElementById('reject-' + id).style.display = 'none';
+  }
+
+  function cancelAgentEdit(id) {
+    document.getElementById('agent-' + id).style.display = 'none';
+  }
+
+  async function agentEdit(id) {
+    const instruction = document.getElementById('agent-input-' + id).value.trim();
+    if (!instruction) return alert('Enter an instruction first');
+    const btn = document.querySelector(`#agent-${id} .btn.save`);
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Rewriting…'; }
+    try {
+      const data = await postApi('/agent-edit', {item_id: id, instruction});
+      document.getElementById('post-' + id).innerHTML = (data.linkedin_post || '').replace(/\\n/g, '<br>');
+      cancelAgentEdit(id);
+      setStatus('AI rewrite complete', 'success');
+      setTimeout(clearStatus, 2000);
+    } catch (err) {
+      setStatus('Failed: ' + err.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '✨ Rewrite'; }
+    }
+  }
+
+  function startReject(id) {
+    document.getElementById('reject-' + id).style.display = 'block';
+    document.getElementById('edit-' + id).style.display = 'none';
+    document.getElementById('agent-' + id).style.display = 'none';
+  }
+
+  function cancelReject(id) {
+    document.getElementById('reject-' + id).style.display = 'none';
+  }
+
+  async function regenerateImage(id) {
+    if (!confirm('This may wake and run your RunPod ComfyUI pod. Continue?')) return;
+    const card = document.querySelector(`article[data-item-id="${id}"]`);
+    const btn = card.querySelector('.btn.image');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Running on RunPod…';
+    try {
+      const data = await postApi('/regenerate-image', {item_id: id});
+      if (data.ok) {
+        const imgBox = card.querySelector('.ln-image img');
+        if (imgBox) {
+          imgBox.src = data.image_url + '?t=' + Date.now();
+        } else {
+          await loadDrafts();
+        }
+      }
+      setStatus('Image regenerated', 'success');
+      setTimeout(clearStatus, 2000);
+    } catch (err) {
+      setStatus('Failed: ' + err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
+
+  window.switchTab = switchTab;
+  window.approve = approve;
+  window.skip = skip;
+  window.rejectDraft = rejectDraft;
+  window.selectImage = selectImage;
+  window.startEdit = startEdit;
+  window.cancelEdit = cancelEdit;
+  window.saveEdit = saveEdit;
+  window.startAgentEdit = startAgentEdit;
+  window.cancelAgentEdit = cancelAgentEdit;
+  window.agentEdit = agentEdit;
+  window.startReject = startReject;
+  window.cancelReject = cancelReject;
+  window.regenerateImage = regenerateImage;
+
+  document.addEventListener('DOMContentLoaded', loadDrafts);
+})();
 '''
 
 

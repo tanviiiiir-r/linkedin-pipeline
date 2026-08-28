@@ -23,6 +23,7 @@ class Draft(BaseModel):
     title: str
     source_url: str
     created_at: str
+    approved_at: str = ""
     approved: bool = False
     published: bool = False
     linkedin_post: str = ""
@@ -181,6 +182,7 @@ pillar: {draft.pillar}
 title: {draft.title}
 source_url: {draft.source_url}
 created_at: {draft.created_at}
+approved_at: {draft.approved_at}
 approved: {draft.approved}
 published: {draft.published}
 image_path: {draft.image_path}
@@ -262,6 +264,7 @@ def _parse_draft_markdown(text: str) -> Draft | None:
         title=data.get("title", ""),
         source_url=data.get("source_url", ""),
         created_at=data.get("created_at", ""),
+        approved_at=data.get("approved_at", ""),
         approved=data.get("approved", "false").lower() == "true",
         published=data.get("published", "false").lower() == "true",
         image_path=data.get("image_path", ""),

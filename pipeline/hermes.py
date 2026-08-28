@@ -776,12 +776,16 @@ def cmd_review_server(args) -> int:
     ensure_dirs()
     host = getattr(args, "host", "127.0.0.1")
     port = getattr(args, "port", 8080)
-    if host == "0.0.0.0":  # nosec B104
+    password = os.environ.get("REVIEW_PASSWORD", getattr(args, "password", "")).strip()
+    if host == "0.0.0.0" and not password:  # nosec B104
         print(
-            "WARNING: review-server binds 0.0.0.0. "
-            "Only expose this behind Traefik/basic-auth or a trusted network.",
+            "ERROR: review-server binds 0.0.0.0 without authentication. "
+            "Set REVIEW_PASSWORD or use --password.",
             file=sys.stderr,
         )
+        return 1
+    if getattr(args, "password", ""):
+        os.environ["REVIEW_PASSWORD"] = args.password
     run_server(host=host, port=port)
     return 0
 
@@ -912,6 +916,7 @@ def main(argv: list[str] | None = None) -> int:
     p_review_server = sub.add_parser("review-server", help="Start tiny HTTP server for the review dashboard")
     p_review_server.add_argument("--host", default="127.0.0.1", help="Bind address")
     p_review_server.add_argument("--port", type=int, default=8080, help="Port")
+    p_review_server.add_argument("--password", default="", help="HTTP Basic Auth password (env REVIEW_PASSWORD takes precedence)")
     p_review_server.set_defaults(func=cmd_review_server)
 
     args = parser.parse_args(argv)

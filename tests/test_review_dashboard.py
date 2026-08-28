@@ -72,5 +72,6 @@ def test_approve_draft():
     draft = make_draft()
     path = save_draft(draft, config.settings.QUEUE_DIR)
     assert approve_draft(draft.item_id)
-    new_text = path.read_text()
+    approved_path = config.settings.QUEUE_DIR / "approved" / path.name
+    new_text = approved_path.read_text()
     assert "approved: True" in new_text

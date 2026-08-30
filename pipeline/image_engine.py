@@ -34,6 +34,9 @@ FAL_MODEL = os.getenv("FAL_MODEL", "fal-ai/flux/schnell")
 IMAGE_DIR = DATA_DIR / "images"
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
+IMAGE_CANDIDATES_DIR = DATA_DIR / "image_candidates"
+IMAGE_CANDIDATES_DIR.mkdir(parents=True, exist_ok=True)
+
 # Target LinkedIn feed aspect ratio ~1.91:1
 TARGET_WIDTH = 1200
 TARGET_HEIGHT = 627
@@ -51,6 +54,114 @@ def _clean_for_prompt(text: str) -> str:
     text = re.sub(r"\n+", ". ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()[:240]
+
+
+def _absolute_url(base: str, src: str) -> str | None:
+    """Resolve a possibly-relative image src URL."""
+    if not src:
+        return None
+    src = src.strip()
+    if src.startswith(("http://", "https://")):
+        return src
+    if src.startswith("//"):
+        return "https:" + src
+    return urllib.parse.urljoin(base, src)
+
+
+def _is_large_enough(img) -> bool:
+    """Reject tiny icons, avatars, and tracking pixels."""
+    try:
+        w = int(img.get("width", "0").replace("px", "").strip() or 0)
+        h = int(img.get("height", "0").replace("px", "").strip() or 0)
+    except ValueError:
+        w, h = 0, 0
+    if w and h:
+        return w >= 240 and h >= 120
+    return True
+
+
+def _download_image(url: str, output_path: Path) -> Path | None:
+    """Download an image and convert webp to jpg for preview compatibility."""
+    try:
+        img_resp = requests.get(
+            url,
+            timeout=20,
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "image/webp,image/apng,image/*,*/*;q=0.8"},
+        )
+        img_resp.raise_for_status()
+        content = img_resp.content
+        if not content:
+            return None
+        output_path.write_bytes(content)
+        if output_path.suffix.lower() == ".webp":
+            try:
+                jpg_path = output_path.with_suffix(".jpg")
+                img = Image.open(output_path)
+                img.convert("RGB").save(jpg_path, "JPEG")
+                output_path.unlink()
+                return jpg_path
+            except (OSError, ValueError):
+                logger.warning("Could not convert webp to jpg for %s", url)
+        logger.info("Downloaded article image: %s", output_path)
+        return output_path
+    except (requests.RequestException, OSError):
+        logger.exception("Image download failed: %s", url)
+    return None
+
+
+def extract_article_images(url: str, item_id: str, max_candidates: int = 4) -> list[str]:
+    """Download OG + article body image candidates for a URL."""
+    candidates_dir = IMAGE_CANDIDATES_DIR / item_id
+    candidates_dir.mkdir(parents=True, exist_ok=True)
+    found: list[str] = []
+    try:
+        page_resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        page_resp.raise_for_status()
+        html_text = page_resp.text
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html_text, "html.parser")
+
+        og = soup.find("meta", property="og:image") or soup.find("meta", attrs={"property": "og:image"})
+        if og:
+            img_url = og.get("content")
+            abs_url = _absolute_url(url, img_url)
+            if abs_url:
+                path = _download_image(abs_url, candidates_dir / "og.jpg")
+                if path:
+                    found.append(str(path))
+
+        if len(found) < max_candidates:
+            tw = soup.find("meta", attrs={"name": "twitter:image"}) or soup.find("meta", property="twitter:image")
+            if tw:
+                img_url = tw.get("content")
+                abs_url = _absolute_url(url, img_url)
+                if abs_url:
+                    path = _download_image(abs_url, candidates_dir / "twitter.jpg")
+                    if path and str(path) not in found:
+                        found.append(str(path))
+
+        if len(found) < max_candidates:
+            for tag in soup.select("article img, main img, .post-content img, .entry-content img"):
+                if len(found) >= max_candidates:
+                    break
+                src = tag.get("src") or tag.get("data-src") or tag.get("data-lazy-src")
+                abs_url = _absolute_url(url, src)
+                if not abs_url:
+                    continue
+                if not _is_large_enough(tag):
+                    continue
+                suffix = Path(abs_url).suffix or ".jpg"
+                suffix = suffix.split("?")[0] or ".jpg"
+                if suffix not in (".jpg", ".jpeg", ".png", ".webp"):
+                    suffix = ".jpg"
+                name = f"article_{len(found)}{suffix}"
+                path = _download_image(abs_url, candidates_dir / name)
+                if path and str(path) not in found:
+                    found.append(str(path))
+    except (requests.RequestException, OSError):
+        logger.exception("Article image extraction failed for %s", url)
+    return found
 
 
 def prompt_for_post(day: str, pillar: str, title: str, linkedin_post: str, hashtags: str) -> str:

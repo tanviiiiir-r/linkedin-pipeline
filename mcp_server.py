@@ -25,8 +25,9 @@ from pipeline.hermes import cmd_collect, cmd_draft, cmd_publish, cmd_score
 from pipeline.publishers.linkedin import DirectLinkedInPublisher
 from pipeline.storage import Item, init_db, list_items
 from pipeline.tokens import has_tokens, load_tokens
+from pipeline.youtube_draft import draft_from_youtube_url
 
-mcp = FastMCP("linkedin-pipeline")
+mcp = FastMCP("linkedin-pipeline", host=os.getenv("FASTMCP_HOST", "127.0.0.1"), port=int(os.getenv("FASTMCP_PORT", "8000")))
 
 
 def _require_auth(token: str) -> bool:
@@ -222,6 +223,27 @@ def _draft_to_dict(draft: Draft) -> dict:
         "newsletter_section": draft.newsletter_section,
     }
 
+
+@mcp.tool()
+def youtube_to_draft(url: str, dry_run: bool = False, auth_token: str = "") -> str:
+    """Convert a YouTube URL into a LinkedIn draft and queue it. Requires MCP_AUTH_TOKEN if configured.
+
+    Args:
+        url: The YouTube video URL.
+        dry_run: If True, return the draft JSON without saving it to the queue.
+    """
+    if not _require_auth(auth_token):
+        return json.dumps({"ok": False, "error": "Unauthorized"})
+    init_db()
+    ensure_dirs()
+    draft = draft_from_youtube_url(url)
+    if not draft:
+        return json.dumps({"ok": False, "error": f"Could not draft from URL: {url}"}, indent=2)
+    if dry_run:
+        return json.dumps({"ok": True, "draft": _draft_to_dict(draft)}, indent=2)
+    return json.dumps({"ok": True, "item_id": draft.item_id, "message": "Draft queued."}, indent=2)
+
+
 @mcp.tool()
 def draft_today(limit: int = 1, dry_run: bool = False) -> str:
     """Draft today's post using the 7-day calendar and LLM humanizer.
@@ -281,4 +303,10 @@ if __name__ == "__main__":
     init_db()
     if MCP_AUTH_TOKEN:
         print("MCP auth token is configured; clients must pass it in tool arguments.", file=sys.stderr)
-    mcp.run(transport="sse", host="127.0.0.1", port=8000)
+    # FastMCP 1.29+ reads host/port from FASTMCP_HOST / FASTMCP_PORT env vars;
+    # host/port kwargs are no longer accepted.
+    import os
+
+    os.environ.setdefault("FASTMCP_HOST", "127.0.0.1")
+    os.environ.setdefault("FASTMCP_PORT", "8000")
+    mcp.run(transport="sse")

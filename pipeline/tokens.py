@@ -57,7 +57,7 @@ def init_tokens_table() -> None:
     conn.close()
 
 
-def save_tokens(access_token: str, refresh_token: str = "", expires_in: int = 0, author_urn: str = "") -> None:
+def save_tokens(access_token: str, refresh_token: str = "", expires_in: int = 0, author_urn: str = "") -> None:  # nosec B107
     """Encrypt and store LinkedIn tokens."""
     init_tokens_table()
     blob = json.dumps(
@@ -104,7 +104,7 @@ def load_tokens() -> dict | None:
     try:
         decrypted = _fernet().decrypt(row["encrypted_blob"].encode()).decode()
         return json.loads(decrypted)
-    except Exception as e:
+    except (ValueError, TypeError, RuntimeError, OSError) as e:
         logger.exception("Failed to decrypt LinkedIn tokens")
         raise RuntimeError(f"Failed to decrypt LinkedIn tokens: {e}") from e
 

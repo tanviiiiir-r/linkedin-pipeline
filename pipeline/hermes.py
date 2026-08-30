@@ -33,7 +33,7 @@ from pipeline.content_analyst import run_analysis
 from pipeline.dedupe import find_duplicate
 from pipeline.drafting import Draft, compile_newsletter, draft_item, load_drafts, save_draft
 from pipeline.drafting_v2 import draft_item_v2
-from pipeline.image_engine import image_for_post
+from pipeline.image_engine import extract_article_images, image_for_post
 from pipeline.invariants import run_health_checks
 from pipeline.log import setup_logging
 from pipeline.publishers.composio import (
@@ -41,6 +41,8 @@ from pipeline.publishers.composio import (
     get_composio_twitter_publisher,
 )
 from pipeline.publishers.linkedin import DirectLinkedInPublisher, DryRunPublisher
+from pipeline.review_dashboard import generate_dashboard
+from pipeline.review_server import run_server
 from pipeline.scoring import is_worthy, score_item
 from pipeline.storage import Item, init_db, item_exists, list_items, save_item, update_status
 from pipeline.tokens import clear_tokens, load_tokens, save_tokens
@@ -289,22 +291,22 @@ def cmd_collect(args) -> int:
                     total += collect_github_trending(url_or_query, dry_run=args.dry_run, limit=args.limit)
                 elif source_type == "github-search":
                     total += collect_github_search(url_or_query, dry_run=args.dry_run, limit=args.limit)
-            except Exception:
+            except (RuntimeError, requests.exceptions.RequestException, OSError):
                 logger.exception("Source %s failed", name)
     if not args.skip_reddit:
         try:
             total += collect_reddit(dry_run=args.dry_run, limit_per_sub=args.limit)
-        except Exception:
+        except (RuntimeError, requests.exceptions.RequestException, OSError):
             logger.exception("Reddit collection failed")
     if not args.skip_youtube:
         try:
             total += collect_youtube(dry_run=args.dry_run, limit_per_channel=args.limit)
-        except Exception:
+        except (RuntimeError, requests.exceptions.RequestException, OSError):
             logger.exception("YouTube collection failed")
     if not args.skip_instagram:
         try:
             total += collect_instagram(dry_run=args.dry_run, limit=args.limit)
-        except Exception:
+        except (RuntimeError, requests.exceptions.RequestException, OSError):
             logger.exception("Instagram collection failed")
     print(f"\nCollection complete: {total} new items")
     return 0
@@ -357,25 +359,25 @@ def cmd_daily(args) -> int:
                     collect_total += collect_github_trending(url_or_query, dry_run=args.dry_run, limit=args.collect_limit)
                 elif source_type == "github-search":
                     collect_total += collect_github_search(url_or_query, dry_run=args.dry_run, limit=args.collect_limit)
-            except Exception as e:
+            except (RuntimeError, requests.exceptions.RequestException, OSError) as e:
                 logger.exception("Source %s failed during daily run", name)
                 source_errors.append(f"{name}: {e}")
     if not args.skip_reddit:
         try:
             collect_total += collect_reddit(dry_run=args.dry_run, limit_per_sub=args.collect_limit)
-        except Exception as e:
+        except (RuntimeError, requests.exceptions.RequestException, OSError) as e:
             logger.exception("Reddit collection failed during daily run")
             source_errors.append(f"reddit: {e}")
     if not args.skip_youtube:
         try:
             collect_total += collect_youtube(dry_run=args.dry_run, limit_per_channel=args.collect_limit)
-        except Exception as e:
+        except (RuntimeError, requests.exceptions.RequestException, OSError) as e:
             logger.exception("YouTube collection failed during daily run")
             source_errors.append(f"youtube: {e}")
     if not args.skip_instagram:
         try:
             collect_total += collect_instagram(dry_run=args.dry_run, limit=args.collect_limit)
-        except Exception as e:
+        except (RuntimeError, requests.exceptions.RequestException, OSError) as e:
             logger.exception("Instagram collection failed during daily run")
             source_errors.append(f"instagram: {e}")
     print(f"\nCollection complete: {collect_total} new items")
@@ -482,7 +484,14 @@ def notify_daily_summary(collected: int, worthy: int, drafted: int, newsletter_s
 
 def cmd_score(args) -> int:
     init_db()
-    items = list_items(limit=args.limit)
+    # By default score items that have not been scored yet so repeated runs make progress.
+    status_filter = getattr(args, "status", None) or "raw"
+    if status_filter == "all":
+        status_filter = None
+    items = list_items(status=status_filter, limit=args.limit)
+    # Fallback to any items if no unscored/raw items remain.
+    if not items:
+        items = list_items(limit=args.limit)
     worthy = 0
     for item in items:
         score = score_item(item)
@@ -542,7 +551,6 @@ def cmd_draft_today(args) -> int:
     target_date = _date.fromisoformat(date_override) if date_override else None
     plan = day_plan(target_date)
     dry_run = getattr(args, "dry_run", False)
-    with_image = getattr(args, "with_image", False)
     force_comfy = getattr(args, "force_comfy", False)
 
     candidates = list_items(status="worthy", limit=args.limit * 5)
@@ -559,11 +567,21 @@ def cmd_draft_today(args) -> int:
         return 1
 
     queued = 0
+    skip_image = getattr(args, "skip_image", False)
     for item, score in selected:
+        # Pre-fetch article/source image candidates so the draft can list them
+        candidates = extract_article_images(item.item_url, item.id, max_candidates=4)
+        if candidates:
+            item.image_candidates = candidates
+            try:
+                save_item(item)
+            except (OSError, RuntimeError):
+                logger.exception("Failed to persist item image_candidates")
+
         draft = draft_item_v2(item, score, day_plan=plan)
 
-        if with_image or force_comfy:
-            img_path = image_for_post(
+        if not skip_image:
+            img_path, img_source = image_for_post(
                 item_url=item.item_url,
                 title=draft.title,
                 day=plan.day_name,
@@ -571,15 +589,20 @@ def cmd_draft_today(args) -> int:
                 linkedin_post=draft.linkedin_post,
                 hashtags=" ".join(draft.hashtags),
                 skip_og=force_comfy,
+                item_id=item.id,
             )
             if img_path:
                 draft.image_path = str(img_path)
+                draft.image_source = img_source
                 # Persist image path on the source item so future drafts can reuse it
                 item.image_path = str(img_path)
+                item.image_source = img_source
                 try:
                     save_item(item)
-                except Exception:
+                except (OSError, RuntimeError):
                     logger.exception("Failed to persist item image_path")
+            else:
+                logger.warning("No image produced for draft %s; review will show placeholder", draft.title)
 
         if dry_run:
             print(f"\n--- DRY-RUN DRAFT ({plan.day_name}, {plan.post_type}) ---")
@@ -694,7 +717,7 @@ def cmd_linkedin_exchange(args) -> int:
         return 1
     try:
         resp = DirectLinkedInPublisher.exchange_code(args.code)
-    except Exception as e:
+    except (requests.exceptions.RequestException, RuntimeError, OSError) as e:
         logger.exception("LinkedIn token exchange failed")
         print(f"Token exchange failed: {e}", file=sys.stderr)
         return 1
@@ -732,6 +755,38 @@ def cmd_linkedin_status(args) -> int:
 def cmd_linkedin_logout(args) -> int:
     clear_tokens()
     print("LinkedIn tokens cleared.")
+    return 0
+
+
+
+
+def cmd_review_dashboard(args) -> int:
+    """Generate the static review dashboard HTML from pending drafts."""
+    init_db()
+    ensure_dirs()
+    path = generate_dashboard()
+    print(f"Review dashboard generated: {path}")
+    print("Start server with: python run.py review-server")
+    return 0
+
+
+def cmd_review_server(args) -> int:
+    """Start the tiny HTTP review server."""
+    init_db()
+    ensure_dirs()
+    host = getattr(args, "host", "127.0.0.1")
+    port = getattr(args, "port", 8080)
+    password = os.environ.get("REVIEW_PASSWORD", getattr(args, "password", "")).strip()
+    if host == "0.0.0.0" and not password:  # nosec B104
+        print(
+            "ERROR: review-server binds 0.0.0.0 without authentication. "
+            "Set REVIEW_PASSWORD or use --password.",
+            file=sys.stderr,
+        )
+        return 1
+    if getattr(args, "password", ""):
+        os.environ["REVIEW_PASSWORD"] = args.password
+    run_server(host=host, port=port)
     return 0
 
 
@@ -778,6 +833,12 @@ def main(argv: list[str] | None = None) -> int:
     p_score.add_argument("--limit", type=int, default=100)
     p_score.add_argument("--min-confidence", type=int, default=50)
     p_score.add_argument("--min-signal", type=int, default=40)
+    p_score.add_argument(
+        "--status",
+        default="raw",
+        choices=["raw", "scored", "worthy", "all"],
+        help="Only score items with this status (default: raw). Use 'all' to rescore everything.",
+    )
     p_score.set_defaults(func=cmd_score)
 
     p_draft = sub.add_parser("draft", help="Draft posts for worthy items")
@@ -844,9 +905,19 @@ def main(argv: list[str] | None = None) -> int:
     p_draft_today.add_argument("--limit", type=int, default=1, help="Number of draft candidates to produce")
     p_draft_today.add_argument("--dry-run", action="store_true", help="Print draft without saving")
     p_draft_today.add_argument("--date", default=None, help="Override date (YYYY-MM-DD) for testing")
-    p_draft_today.add_argument("--with-image", action="store_true", dest="with_image", help="Generate or fetch an image for the draft (OG first, then ComfyUI)")
+    p_draft_today.add_argument("--with-image", action="store_true", default=True, dest="with_image", help="Generate or fetch an image for the draft (OG first, then ComfyUI) [default: on]")
+    p_draft_today.add_argument("--skip-image", action="store_true", dest="skip_image", help="Skip image generation for this run")
     p_draft_today.add_argument("--force-comfy", action="store_true", dest="force_comfy", help="Always generate a fresh ComfyUI image (skips OpenGraph fallback)")
     p_draft_today.set_defaults(func=cmd_draft_today)
+
+    p_review_dashboard = sub.add_parser("review-dashboard", help="Generate static HTML review dashboard for pending drafts")
+    p_review_dashboard.set_defaults(func=cmd_review_dashboard)
+
+    p_review_server = sub.add_parser("review-server", help="Start tiny HTTP server for the review dashboard")
+    p_review_server.add_argument("--host", default="127.0.0.1", help="Bind address")
+    p_review_server.add_argument("--port", type=int, default=8080, help="Port")
+    p_review_server.add_argument("--password", default="", help="HTTP Basic Auth password (env REVIEW_PASSWORD takes precedence)")
+    p_review_server.set_defaults(func=cmd_review_server)
 
     args = parser.parse_args(argv)
     if not args.command:

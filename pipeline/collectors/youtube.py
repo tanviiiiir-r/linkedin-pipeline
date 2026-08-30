@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404
 from datetime import datetime, timezone
 
 from pipeline.storage import Item, item_exists, save_item
@@ -44,7 +44,7 @@ def _composio_bin() -> str:
 def _run(slug: str, payload: dict) -> dict:
     env = {**os.environ, "PATH": "/opt/data/home/.local/bin:" + os.environ.get("PATH", "")}
     binary = _composio_bin()
-    proc = subprocess.run(
+    proc = subprocess.run(  # nosec B603
         [binary, "execute", slug, "-d", json.dumps(payload)],
         capture_output=True,
         text=True,

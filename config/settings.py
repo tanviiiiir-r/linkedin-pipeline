@@ -12,6 +12,7 @@ DATA_DIR = Path(os.getenv("DATA_DIR", REPO_ROOT / "data")).expanduser()
 RAW_DIR = DATA_DIR / "raw"
 QUEUE_DIR = DATA_DIR / "queue"
 NEWSLETTER_DIR = DATA_DIR / "newsletters"
+REVIEW_DIR = DATA_DIR / "review"
 ANALYSIS_DIR = DATA_DIR / "analysis"
 DB_PATH = DATA_DIR / "content.db"
 SOURCES_CSV = REPO_ROOT / "sources.csv"
@@ -55,5 +56,5 @@ REQUIRE_APPROVAL = os.getenv("REQUIRE_APPROVAL", "true").lower() in ("1", "true"
 
 
 def ensure_dirs():
-    for d in (DATA_DIR, RAW_DIR, QUEUE_DIR, NEWSLETTER_DIR, ANALYSIS_DIR):
+    for d in (DATA_DIR, RAW_DIR, QUEUE_DIR, NEWSLETTER_DIR, ANALYSIS_DIR, REVIEW_DIR):
         d.mkdir(parents=True, exist_ok=True)

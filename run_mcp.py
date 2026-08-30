@@ -11,8 +11,29 @@ repo = Path(__file__).resolve().parent
 if str(repo) not in sys.path:
     sys.path.insert(0, str(repo))
 
+import uvicorn
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.requests import Request
+from starlette.responses import Response
+
 from config.settings import MCP_AUTH_TOKEN
 from mcp_server import mcp
+
+
+class _BearerTokenMiddleware(BaseHTTPMiddleware):
+    """Require Authorization: Bearer <MCP_AUTH_TOKEN> on every request when a token is configured."""
+
+    def __init__(self, app, token: str):
+        super().__init__(app)
+        self.token = token
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if self.token:
+            auth = request.headers.get("authorization", "")
+            parts = auth.split()
+            if not (len(parts) == 2 and parts[0].lower() == "bearer" and parts[1] == self.token):
+                return Response("Unauthorized", status_code=401, headers={"WWW-Authenticate": "Bearer"})
+        return await call_next(request)
 
 
 def main() -> int:
@@ -34,7 +55,18 @@ def main() -> int:
     print(f"Starting MCP server on {args.host}:{args.port} ({args.transport})", file=sys.stderr)
     if MCP_AUTH_TOKEN:
         print("MCP auth token is configured.", file=sys.stderr)
-    mcp.run(transport=args.transport, host=args.host, port=args.port)
+
+    if args.transport == "stdio":
+        mcp.run(transport="stdio")
+        return 0
+
+    # For SSE, build the Starlette app and wrap it with bearer-token middleware so
+    # auth is enforced at the HTTP layer, not just inside each tool call.
+    app = mcp.sse_app()
+    if MCP_AUTH_TOKEN:
+        app = _BearerTokenMiddleware(app, MCP_AUTH_TOKEN)
+
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0
 
 

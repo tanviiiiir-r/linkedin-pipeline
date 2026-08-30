@@ -1,0 +1,21 @@
+http:
+  routers:
+    linkedin-review:
+      rule: "Host(`review.caraxis.online`)"
+      entrypoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      service: linkedin-review
+      middlewares:
+        - linkedin-review-auth
+  services:
+    linkedin-review:
+      loadBalancer:
+        servers:
+          - url: "http://172.18.0.2:8080"
+  middlewares:
+    linkedin-review-auth:
+      basicAuth:
+        users:
+          - "hermes:$$apr1$$IK0wyBCm$$PQf78JyrYc7ESLxOiQzn4."

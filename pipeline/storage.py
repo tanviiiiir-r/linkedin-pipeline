@@ -45,6 +45,8 @@ class Item(BaseModel):
     reddit_comments: int = 0
     reddit_permalink: str = ""
     image_path: str = ""
+    image_source: str = ""  # source_native | og | article | comfy | placeholder
+    image_candidates: list[str] = Field(default_factory=list)
 
     model_config = {"extra": "ignore"}
 
@@ -112,7 +114,7 @@ def _supabase_storage() -> Optional["SupabaseStorage"]:
         s = _get_supabase_storage()
         if s and s.is_available():
             return s
-    except Exception:
+    except (ImportError, RuntimeError, OSError):
         logger.exception("Supabase backend unavailable")
     return None
 

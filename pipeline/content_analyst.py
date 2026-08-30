@@ -171,12 +171,20 @@ def _llm_perfection(draft: Draft, day_plan: DayPlan) -> tuple[int, list[str], st
     )
     try:
         resp = complete(user, system=system, temperature=0.2)
-        data = json.loads(resp.text or "{}")
+        # Some models wrap JSON in markdown code fences; strip them before parsing.
+        raw = (resp.text or "").strip()
+        if raw.startswith("```"):
+            lines = raw.splitlines()
+            lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            raw = "\n".join(lines).strip()
+        data = json.loads(raw or "{}")
         score = int(data.get("score", 70))
         issues = [str(i) for i in data.get("issues", [])]
         notes = data.get("notes", "")
         return max(0, min(100, score)), issues, notes
-    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+    except (json.JSONDecodeError, ValueError, TypeError, requests.exceptions.RequestException) as exc:
         logger.warning("LLM perfection analysis failed: %s", exc)
         return _heuristic_perfection(draft, day_plan)
 

@@ -551,7 +551,8 @@ def cmd_draft_today(args) -> int:
     target_date = _date.fromisoformat(date_override) if date_override else None
     plan = day_plan(target_date)
     dry_run = getattr(args, "dry_run", False)
-    force_comfy = getattr(args, "force_comfy", False)
+    force_generate = getattr(args, "force_generate", False)
+    image_provider = getattr(args, "image_provider", None)
 
     candidates = list_items(status="worthy", limit=args.limit * 5)
     if not candidates:
@@ -588,7 +589,8 @@ def cmd_draft_today(args) -> int:
                 pillar=plan.post_type,
                 linkedin_post=draft.linkedin_post,
                 hashtags=" ".join(draft.hashtags),
-                skip_og=force_comfy,
+                skip_og=force_generate,
+                provider=image_provider,
                 item_id=item.id,
             )
             if img_path:
@@ -905,9 +907,10 @@ def main(argv: list[str] | None = None) -> int:
     p_draft_today.add_argument("--limit", type=int, default=1, help="Number of draft candidates to produce")
     p_draft_today.add_argument("--dry-run", action="store_true", help="Print draft without saving")
     p_draft_today.add_argument("--date", default=None, help="Override date (YYYY-MM-DD) for testing")
-    p_draft_today.add_argument("--with-image", action="store_true", default=True, dest="with_image", help="Generate or fetch an image for the draft (OG first, then ComfyUI) [default: on]")
+    p_draft_today.add_argument("--with-image", action="store_true", default=True, dest="with_image", help="Generate or fetch an image for the draft (OG first, then provider) [default: on]")
     p_draft_today.add_argument("--skip-image", action="store_true", dest="skip_image", help="Skip image generation for this run")
-    p_draft_today.add_argument("--force-comfy", action="store_true", dest="force_comfy", help="Always generate a fresh ComfyUI image (skips OpenGraph fallback)")
+    p_draft_today.add_argument("--force-generate", action="store_true", dest="force_generate", help="Always generate a fresh image via the configured provider (skips OpenGraph fallback)")
+    p_draft_today.add_argument("--image-provider", dest="image_provider", default=None, help="Image provider to use: pollinations, fal (default: env IMAGE_PROVIDER or pollinations)")
     p_draft_today.set_defaults(func=cmd_draft_today)
 
     p_review_dashboard = sub.add_parser("review-dashboard", help="Generate static HTML review dashboard for pending drafts")

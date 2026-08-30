@@ -432,21 +432,38 @@ def _generate_with_pollinations(
         f"{seed_param}"
         f"&negative_prompt=text,words,letters,numbers,logo,watermark,trademark,UI,labels,signature,lowres,blurry,ugly,deformed,oversaturated"
     )
-    try:
-        resp = requests.get(url, timeout=180)
-        resp.raise_for_status()
-        if not resp.content or len(resp.content) < 4000:
-            logger.warning("Pollinations returned empty/too-small response")
+    # Retry with exponential backoff on rate-limit or transient errors.
+    for attempt in range(4):
+        try:
+            resp = requests.get(url, timeout=180)
+            if resp.status_code == 429:
+                wait = 5 * (2 ** attempt)
+                logger.warning("Pollinations rate-limited (429), retrying in %ss", wait)
+                import time
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            if not resp.content or len(resp.content) < 4000:
+                logger.warning("Pollinations returned empty/too-small response")
+                return None
+            _save_response_image(resp, output_path)
+            if not _is_usable_size(output_path):
+                logger.warning("Pollinations image failed size check: %s", output_path)
+                output_path.unlink(missing_ok=True)
+                return None
+            logger.info("Downloaded image from Pollinations.ai: %s", output_path)
+            return output_path
+        except requests.HTTPError as exc:
+            if attempt < 3:
+                logger.warning("Pollinations attempt %s failed: %s", attempt + 1, exc)
+                import time
+                time.sleep(2 * (2 ** attempt))
+                continue
+            logger.exception("Pollinations.ai generation failed after retries")
             return None
-        _save_response_image(resp, output_path)
-        if not _is_usable_size(output_path):
-            logger.warning("Pollinations image failed size check: %s", output_path)
-            output_path.unlink(missing_ok=True)
+        except (requests.RequestException, OSError, ValueError):
+            logger.exception("Pollinations.ai generation failed")
             return None
-        logger.info("Downloaded image from Pollinations.ai: %s", output_path)
-        return output_path
-    except (requests.RequestException, OSError, ValueError):
-        logger.exception("Pollinations.ai generation failed")
     return None
 
 

@@ -51,14 +51,46 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")[:60]
 
 
-def _clean_for_prompt(text: str) -> str:
+def _clean_for_prompt(text: str, max_len: int = 240) -> str:
     """Remove URLs, markdown, overly technical tokens, and keep only visual words."""
     text = re.sub(r"https?://\S+", "", text)
     text = re.sub(r"[#@]\w+", "", text)
     text = re.sub(r"\*+", "", text)
     text = re.sub(r"\n+", ". ", text)
     text = re.sub(r"\s+", " ", text)
-    return text.strip()[:240]
+    return text.strip()[:max_len]
+
+
+
+def _extract_visual_keywords(title: str, linkedin_post: str, hashtags: str) -> tuple[str, str]:
+    """Extract a concrete visual subject and a short keyword list from the post."""
+    clean_title = _clean_for_prompt(title, max_len=160)
+    clean_post = _clean_for_prompt(linkedin_post, max_len=400)
+    topic_re = re.compile(
+        r"\b("
+        r"(?:multi[- ]?agent|agentic|coding|red[- ]?team|jailbreak|safety|security|cyber|harness|"
+        r"tokeniz|embedd|fine[- ]?tun|post[- ]?train|RL|scaling|inference|deployment|"
+        r"orchestrat|delegat|routing|least[- ]?privilege|data center|workspace|server|cloud|"
+        r"abstract|conceptual|developer|builder|startup|founder|strategy|horizon|future)"
+        r"[a-z]*)\b",
+        re.IGNORECASE,
+    )
+    topics = sorted({t.lower() for t in topic_re.findall(clean_post)})
+    if not topics:
+        topics = ["technology"]
+    # Keep up to 4
+    keywords = ", ".join(topics[:4])
+
+    # Build a concrete subject line: title + first sentence of post if different
+    subject = clean_title
+    first_sentence = ""
+    if clean_post and clean_post != clean_title:
+        m = re.split(r"(?<=[.!?])\s+", clean_post.strip())
+        if m:
+            first_sentence = m[0][:160]
+    if first_sentence and first_sentence.lower() not in clean_title.lower():
+        subject = f"{clean_title}: {first_sentence}"
+    return subject, keywords
 
 
 def _absolute_url(base: str, src: str) -> str | None:
@@ -155,24 +187,31 @@ def _download_image(url: str, output_path: Path) -> Path | None:
 
 def _download_unsplash(query: str, output_path: Path, width: int = TARGET_WIDTH, height: int = TARGET_HEIGHT) -> Path | None:
     """Download a relevant Unsplash image using the source API (free, no key)."""
-    try:
-        encoded = urllib.parse.quote(query)
-        # source.unsplash.com is deprecated but still works in many regions; if it fails we degrade.
-        url = f"https://source.unsplash.com/{width}x{height}/?{encoded}"
-        resp = requests.get(url, timeout=30, allow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
-        resp.raise_for_status()
-        if not resp.content or len(resp.content) < 2000:
-            logger.warning("Unsplash returned empty/too-small response")
-            return None
-        _save_response_image(resp, output_path)
-        if not _is_usable_size(output_path):
-            logger.warning("Unsplash image too small, ignoring %s", output_path)
-            output_path.unlink(missing_ok=True)
-            return None
-        logger.info("Downloaded image from Unsplash: %s", output_path)
-        return output_path
-    except (requests.RequestException, OSError, ValueError):
-        logger.exception("Unsplash download failed for %s", query)
+    # source.unsplash.com is deprecated/unreliable; try a few query variants before giving up.
+    base_queries = [query, query.split()[0] if query else "", "technology abstract"]
+    seen = []
+    for q in base_queries:
+        q = q.strip()
+        if not q or q in seen:
+            continue
+        seen.append(q)
+        try:
+            encoded = urllib.parse.quote(q)
+            url = f"https://source.unsplash.com/{width}x{height}/?{encoded}"
+            resp = requests.get(url, timeout=30, allow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
+            resp.raise_for_status()
+            if not resp.content or len(resp.content) < 4000:
+                logger.warning("Unsplash returned empty/too-small response for query: %s", q)
+                continue
+            _save_response_image(resp, output_path)
+            if not _is_usable_size(output_path, min_width=600, min_height=300):
+                logger.warning("Unsplash image too small, ignoring %s", output_path)
+                output_path.unlink(missing_ok=True)
+                continue
+            logger.info("Downloaded image from Unsplash (query=%s): %s", q, output_path)
+            return output_path
+        except (requests.RequestException, OSError, ValueError):
+            logger.exception("Unsplash download failed for query: %s", q)
     return None
 
 
@@ -180,23 +219,24 @@ def _build_unsplash_query(day: str, pillar: str, title: str, linkedin_post: str,
     """Create a concise Unsplash search query from post metadata."""
     pillar_lower = (pillar or "").lower()
     title_clean = _clean_for_prompt(title or linkedin_post or "technology")
-    if "security" in pillar_lower:
-        return "cybersecurity technology dark"
-    if "founder" in pillar_lower:
-        return "business strategy office laptop"
-    if "tool" in pillar_lower:
-        return "software technology dashboard"
-    if "builder" in pillar_lower:
-        return "developer coding workspace"
-    if "tomorrow" in pillar_lower:
-        return "futuristic technology horizon"
-    if "viral" in pillar_lower:
-        return "technology innovation abstract"
-    if "pattern" in pillar_lower:
-        return "network technology abstract"
-    if "ai" in title_clean.lower():
-        return "artificial intelligence technology"
-    return "technology abstract"
+    # Pull 2-3 meaningful words from title for relevance
+    drop_words = {"the", "a", "an", "and", "or", "but", "with", "for", "from", "how", "what", "why", "can", "you", "your", "new", "now", "are", "is", "to", "in", "on", "of", "at", "by"}
+    words = [w for w in re.findall(r"[A-Za-z0-9]+", title_clean) if len(w) > 2 and w.lower() not in drop_words]
+    keyword_phrase = " ".join(words[:4]) if words else ""
+
+    pillar_map = {
+        "security": "cybersecurity technology dark",
+        "founder": "business strategy office laptop",
+        "tool": "software technology dashboard",
+        "builder": "developer coding workspace",
+        "tomorrow": "futuristic technology horizon",
+        "viral": "technology innovation abstract",
+        "pattern": "network technology abstract",
+    }
+    generic = pillar_map.get(pillar_lower, "technology abstract")
+    if keyword_phrase:
+        return f"{keyword_phrase} {generic}"
+    return generic
 
 
 def extract_article_images(url: str, item_id: str, max_candidates: int = 4) -> list[str]:
@@ -265,49 +305,38 @@ def prompt_for_post(
     linkedin_post: str,
     hashtags: str,
     angle: str = "",
+    stock_style: bool = False,
 ) -> str:
     """Build a LinkedIn-optimized image prompt from post metadata.
 
     The optional `angle` lets us generate multiple AI variants from different
     perspectives / environments / messages / POVs while keeping the same core
-    subject.
+    subject. `stock_style` requests a photorealistic stock-photo look for
+    non-AI fallback slots.
     """
-    base = _clean_for_prompt(title or linkedin_post)
-    summary = _clean_for_prompt(linkedin_post)
-    entities = re.findall(
-        r"\b(AWS|Google|OpenAI|Anthropic|Meta|Microsoft|NVIDIA|Cloudflare|Amazon|DeepMind|Gemini|Nvidia|ChatGPT|Claude|Llama|Python|Kubernetes|Docker|React|TypeScript|Cursor|Windsurf|Ollama|Hugging Face)\b",
-        base + " " + summary,
-    )
-    entity_clause = ""
-    if entities:
-        entity_clause = f" Inspired by the visual language of {entities[0]}, but no logos, trademarks, or text."
-
-    subject = base
-    if summary and summary != base:
-        # Use first sentence only to keep the prompt tight and the visual focused.
-        first_sentence = re.split(r"(?<=[.!?])\s+", summary.strip())[0]
-        subject = f"{base}: {first_sentence[:140]}"
+    subject, keywords = _extract_visual_keywords(title, linkedin_post, hashtags)
 
     angle = (angle or "").strip().lower()
     if angle == "environment":
         angle_clause = (
-            "Wide establishing shot of the environment where this technology is used, "
-            "modern workspace or data center ambience, soft ambient light, cinematic depth."
+            "Wide establishing environmental shot: show the real-world setting where this subject lives — "
+            "a calm modern office, a server room with subtle blue glow, or a clean lab/workspace. "
+            "Soft natural light, shallow cinematic depth, no people required."
         )
     elif angle == "message":
         angle_clause = (
-            "Tight conceptual illustration of the core message or transformation, "
-            "one bold symbolic object in the center, clean negative space, editorial graphic style."
+            "Conceptual editorial illustration of the core message: one strong symbolic object or scene "
+            "that sums up the transformation, centered in clean negative space, magazine-cover graphic style."
         )
     elif angle == "focus":
         angle_clause = (
-            "Macro hero detail: a single screen element, chip, lock, or UI component in razor focus, "
-            "bokeh background, product photography lighting."
+            "Macro hero detail: a single meaningful object in razor-sharp focus — a chip, lock, screen fragment, "
+            "or UI element — with creamy bokeh behind it, product-photography lighting."
         )
     elif angle == "pov":
         angle_clause = (
-            "First-person point-of-view shot of someone interacting with this technology, "
-            "hands on keyboard or holding device, over-the-shoulder angle, immersive and human."
+            "First-person point-of-view: over-the-shoulder or hands-on-device view of someone using this technology, "
+            "immersive and human, shallow depth of field, professional business context."
         )
     else:
         angle_clause = "Professional editorial hero shot, centered composition, clean background."
@@ -316,31 +345,38 @@ def prompt_for_post(
     pillar_lower = (pillar or "").lower()
 
     style_fragments = []
-    if "tool" in pillar_lower or "monday" in day_lower:
-        style_fragments.append("clean abstract SaaS product hero card, dark mode, blue accent, minimal, 1.91:1 landscape")
-    elif "viral" in pillar_lower or "tuesday" in day_lower:
-        style_fragments.append("bold news-style editorial header, strong visual metaphor, dynamic diagonal composition, controlled neural shapes, 1.91:1 landscape")
-    elif "pattern" in pillar_lower or "wednesday" in day_lower:
-        style_fragments.append("two connected panels with flowing data lines, inputs-to-output infographic, blue-purple gradient, 1.91:1 landscape")
-    elif "builder" in pillar_lower or "thursday" in day_lower:
-        style_fragments.append("cozy developer workspace, focused UI element with blurred screen glow, warm desk lighting, 1.91:1 landscape")
-    elif "security" in pillar_lower or "friday" in day_lower:
-        style_fragments.append("dark cybersecurity editorial header, abstract lock-shield geometry, amber-red glow on deep blue, 1.91:1 landscape")
-    elif "founder" in pillar_lower or "saturday" in day_lower:
-        style_fragments.append("strategic founder office scene, market chart or whiteboard, soft natural light, back-or-side view, 1.91:1 landscape")
-    elif "tomorrow" in pillar_lower or "sunday" in day_lower:
-        style_fragments.append("wide futuristic horizon, dawn cityscape silhouette, glowing data streams, one central symbol, 1.91:1 landscape")
+    if stock_style:
+        style_fragments.append(
+            "authentic photorealistic stock photograph, clean professional business look, "
+            "subtle depth of field, natural color grading, no stylized illustration, 1.91:1 landscape"
+        )
     else:
-        style_fragments.append("modern tech editorial illustration, clean composition, professional LinkedIn cover style, 1.91:1 landscape")
+        if "tool" in pillar_lower or "monday" in day_lower:
+            style_fragments.append("polished 3D product hero shot, dark-mode UI, soft blue accent light, minimal background, 1.91:1 landscape")
+        elif "viral" in pillar_lower or "tuesday" in day_lower:
+            style_fragments.append("bold editorial header, strong visual metaphor, controlled neural/geometric shapes, cinematic color, 1.91:1 landscape")
+        elif "pattern" in pillar_lower or "wednesday" in day_lower:
+            style_fragments.append("two-panel inputs-to-output diagram, flowing data lines, blue-purple gradient, clean infographic, 1.91:1 landscape")
+        elif "builder" in pillar_lower or "thursday" in day_lower:
+            style_fragments.append("real developer workspace, focused UI/hardware detail with soft screen glow, warm practical lighting, 1.91:1 landscape")
+        elif "security" in pillar_lower or "friday" in day_lower:
+            style_fragments.append("dark cybersecurity editorial scene, abstract lock-shield geometry, amber-red glow on deep blue, moody cinematic, 1.91:1 landscape")
+        elif "founder" in pillar_lower or "saturday" in day_lower:
+            style_fragments.append("strategic office scene, whiteboard or market chart, soft natural window light, back-or-side view silhouette, 1.91:1 landscape")
+        elif "tomorrow" in pillar_lower or "sunday" in day_lower:
+            style_fragments.append("wide futuristic horizon, dawn cityscape silhouette, glowing data streams, one central symbol, cinematic optimistic mood, 1.91:1 landscape")
+        else:
+            style_fragments.append("modern tech editorial illustration, clean composition, professional LinkedIn cover style, 1.91:1 landscape")
 
     style = ", ".join(style_fragments)
 
     prompt = (
-        f"Professional editorial LinkedIn header image about {subject}. "
-        f"{angle_clause} {style}.{entity_clause} "
-        "No text, letters, numbers, logos, watermarks, trademarks, UI chrome, or readable labels. "
-        "Cinematic lighting, sharp focus, photorealistic 3D render, high detail, clean centered composition, "
-        "visually striking, safe for a professional business and developer audience."
+        f"Create a professional LinkedIn header image about {subject}. "
+        f"Key themes: {keywords}. "
+        f"{angle_clause} {style}. "
+        "High detail, sharp focus, cinematic lighting, clean centered composition, "
+        "visually striking, suitable for a professional business and developer audience. "
+        "No text, letters, numbers, words, logos, watermarks, trademarks, UI chrome, or readable labels."
     )
     return prompt
 
@@ -373,22 +409,40 @@ def _fetch_og_image(url: str, output_path: Path) -> Path | None:
     return None
 
 
-def _generate_with_pollinations(prompt: str, output_path: Path, width: int = TARGET_WIDTH, height: int = TARGET_HEIGHT) -> Path | None:
-    """Generate an image via Pollinations.ai (free, no API key)."""
+def _generate_with_pollinations(
+    prompt: str,
+    output_path: Path,
+    width: int = TARGET_WIDTH,
+    height: int = TARGET_HEIGHT,
+    seed: int | None = None,
+) -> Path | None:
+    """Generate an image via Pollinations.ai (free, no API key).
+
+    Uses Flux Schnell by default for a good quality/speed trade-off and a stable
+    seed for reproducibility.
+    """
     encoded = urllib.parse.quote(prompt)
+    seed_param = f"&seed={seed}" if seed is not None else ""
+    # model=flux uses Flux Schnell on Pollinations; seed keeps results stable.
     url = (
         f"https://image.pollinations.ai/prompt/{encoded}"
         f"?width={width}&height={height}"
         f"&nologo=true"
+        f"&model=flux"
+        f"{seed_param}"
         f"&negative_prompt=text,words,letters,numbers,logo,watermark,trademark,UI,labels,signature,lowres,blurry,ugly,deformed,oversaturated"
     )
     try:
-        resp = requests.get(url, timeout=120)
+        resp = requests.get(url, timeout=180)
         resp.raise_for_status()
-        if not resp.content or len(resp.content) < 1000:
+        if not resp.content or len(resp.content) < 4000:
             logger.warning("Pollinations returned empty/too-small response")
             return None
         _save_response_image(resp, output_path)
+        if not _is_usable_size(output_path):
+            logger.warning("Pollinations image failed size check: %s", output_path)
+            output_path.unlink(missing_ok=True)
+            return None
         logger.info("Downloaded image from Pollinations.ai: %s", output_path)
         return output_path
     except (requests.RequestException, OSError, ValueError):
@@ -432,14 +486,37 @@ def _generate_with_fal(prompt: str, output_path: Path) -> Path | None:
     return None
 
 
-def _generate_image(prompt: str, output_path: Path, provider: str, width: int = TARGET_WIDTH, height: int = TARGET_HEIGHT) -> Path | None:
+def _generate_image(
+    prompt: str,
+    output_path: Path,
+    provider: str,
+    width: int = TARGET_WIDTH,
+    height: int = TARGET_HEIGHT,
+    seed: int | None = None,
+) -> Path | None:
     """Dispatch to the configured image generation provider."""
     if provider == "fal":
         return _generate_with_fal(prompt, output_path)
     if provider == "pollinations":
-        return _generate_with_pollinations(prompt, output_path, width=width, height=height)
+        return _generate_with_pollinations(prompt, output_path, width=width, height=height, seed=seed)
     logger.warning("Unknown image provider %s", provider)
     return None
+
+
+def _generate_ai_stock_photo(
+    day: str,
+    pillar: str,
+    title: str,
+    linkedin_post: str,
+    hashtags: str,
+    output_path: Path,
+    provider: str,
+    seed: int,
+) -> Path | None:
+    """Generate a photorealistic stock-style image when real stock APIs fail."""
+    prompt = prompt_for_post(day, pillar, title, linkedin_post, hashtags, stock_style=True)
+    logger.info("AI stock photo prompt: %s", prompt)
+    return _generate_image(prompt, output_path, provider, seed=seed)
 
 
 def _search_pexels(query: str, output_path: Path) -> Path | None:
@@ -513,11 +590,13 @@ def candidates_for_post(
     chosen_provider = provider or IMAGE_PROVIDER
     candidates_dir = IMAGE_CANDIDATES_DIR / (item_id or _slug(title) or "draft")
     candidates_dir.mkdir(parents=True, exist_ok=True)
+    # Stable seed derived from title+item_id so re-runs are deterministic but per-item unique.
+    base_seed = abs(hash(f"{title or item_url or ''}:{item_id or ''}:{chosen_provider}")) % (2**31)
 
     non_ai: list[Path] = []
     ai: list[Path] = []
 
-    # 1. Non-AI: article/OG images
+    # 1. Non-AI: article/OG/Twitter images
     article_cands = extract_article_images(item_url, item_id or _slug(title), max_candidates=NON_AI_CANDIDATES)
     for p in article_cands:
         path = Path(p)
@@ -526,21 +605,30 @@ def candidates_for_post(
         if len(non_ai) >= NON_AI_CANDIDATES:
             break
 
-    # 2. Non-AI fallback: Pexels curated search (API key optional) then Unsplash
+    # 2. Non-AI fallback: Pexels (API key) > Unsplash Source > AI photorealistic stock
     if len(non_ai) < NON_AI_CANDIDATES:
         stock_query = _extract_pexels_query(day, pillar, title)
         for i in range(NON_AI_CANDIDATES - len(non_ai)):
+            slot_seed = base_seed + i
             out = candidates_dir / f"pexels_{i}.jpg"
             result = _search_pexels(stock_query + (f" {i}" if i else ""), out)
             if result and _is_usable_size(result) and result not in non_ai:
                 non_ai.append(result)
                 continue
-            # Fallback to Unsplash if Pexels is not configured or returned nothing usable
+            # Fallback to Unsplash Source if Pexels is not configured or returned nothing usable
             unsplash_query = _build_unsplash_query(day, pillar, title, linkedin_post, hashtags)
             out2 = candidates_dir / f"unsplash_{i}.jpg"
             result2 = _download_unsplash(unsplash_query, out2)
             if result2 and result2 not in non_ai:
                 non_ai.append(result2)
+                continue
+            # Last-resort: AI-generated photorealistic stock photo so we still deliver 4 candidates
+            out3 = candidates_dir / f"ai_stock_{i}.png"
+            result3 = _generate_ai_stock_photo(
+                day, pillar, title, linkedin_post, hashtags, out3, chosen_provider, seed=slot_seed
+            )
+            if result3 and _is_usable_size(result3) and result3 not in non_ai:
+                non_ai.append(result3)
             if len(non_ai) >= NON_AI_CANDIDATES:
                 break
 
@@ -553,7 +641,8 @@ def candidates_for_post(
         prompt = prompt_for_post(day, pillar, title, linkedin_post, hashtags, angle=angle)
         logger.info("AI image prompt (%s): %s", angle, prompt)
         out = IMAGE_DIR / f"{h}_{angle}_{chosen_provider}.png"
-        result = _generate_image(prompt, out, chosen_provider)
+        seed = base_seed + idx + 100
+        result = _generate_image(prompt, out, chosen_provider, seed=seed)
         if result and _is_usable_size(result) and result not in ai:
             ai.append(result)
 

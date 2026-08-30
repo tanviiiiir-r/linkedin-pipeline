@@ -23,7 +23,6 @@ from pipeline.approval import (
     list_rejected,
     skip_draft,
 )
-from pipeline.content_analyst import analyze_queued_items
 from pipeline.drafting import Draft, _draft_markdown, _parse_draft_markdown
 from pipeline.image_engine import IMAGE_DIR, image_for_post
 from pipeline.llm_client import chat, is_available
@@ -204,19 +203,6 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         analysis_map = {}
-        if status == "pending":
-            try:
-                for r in analyze_queued_items(limit=100):
-                    analysis_map[r.item_id] = {
-                        "relevance_score": r.relevance_score,
-                        "accuracy_score": r.accuracy_score,
-                        "perfection_score": r.perfection_score,
-                        "issues": r.issues,
-                        "proposed_action": r.proposed_action,
-                    }
-            except Exception:
-                logger.exception("Analysis failed for dashboard")
-
         total = len(drafts)
         page = drafts[offset : offset + limit]
         out = [_draft_to_json(d, analysis_map.get(d.item_id), status=status_label) for d in page]

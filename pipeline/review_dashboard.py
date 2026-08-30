@@ -13,7 +13,6 @@ from pathlib import Path
 from config.calendar import day_plan
 from config.settings import QUEUE_DIR, REVIEW_DIR, ensure_dirs
 from pipeline.approval import list_pending
-from pipeline.drafting import Draft
 
 logger = logging.getLogger(__name__)
 

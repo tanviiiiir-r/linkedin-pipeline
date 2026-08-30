@@ -2,14 +2,13 @@
 
 Economic provider chain:
 1. Source article OpenGraph image (free, fast, relevant)
-2. Pollinations.ai free image generation (no API key)
-3. Pexels free stock photo search (no API key, optional)
+2. Provider-generated image (free Pollinations.ai by default; optional Fal AI)
+3. Pexels free stock photo search (optional API key)
 4. Text-only post if all image sources fail
-
-RunPod/ComfyUI support is removed to avoid hourly GPU rental costs.
 """
 import html
 import logging
+import os
 import re
 import urllib.parse
 from io import BytesIO
@@ -24,8 +23,13 @@ from pipeline.log import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# Optional API keys (most providers below work without keys)
-PEXELS_API_KEY = __import__("os").getenv("PEXELS_API_KEY", "")
+# Provider configuration
+IMAGE_PROVIDER = os.getenv("IMAGE_PROVIDER", "pollinations").lower()
+FAL_KEY = os.getenv("FAL_KEY", "")
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
+
+# Fal model alias (cheap + fast)
+FAL_MODEL = os.getenv("FAL_MODEL", "fal-ai/flux/schnell")
 
 IMAGE_DIR = DATA_DIR / "images"
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
@@ -112,9 +116,22 @@ def _fetch_og_image(url: str, output_path: Path) -> Path | None:
             output_path.write_bytes(img_resp.content)
         logger.info("Downloaded OG image: %s", output_path)
         return output_path
-    except Exception:
+    except (requests.RequestException, OSError, ValueError):
         logger.exception("OG image fetch failed for %s", url)
     return None
+
+
+def _save_response_image(resp: requests.Response, output_path: Path) -> Path | None:
+    """Save image bytes from a response as PNG, converting if needed."""
+    try:
+        img = Image.open(BytesIO(resp.content))
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        img.save(output_path, "PNG")
+        return output_path
+    except (OSError, ValueError):
+        output_path.write_bytes(resp.content)
+        return output_path
 
 
 def _generate_with_pollinations(prompt: str, output_path: Path, width: int = TARGET_WIDTH, height: int = TARGET_HEIGHT) -> Path | None:
@@ -132,15 +149,57 @@ def _generate_with_pollinations(prompt: str, output_path: Path, width: int = TAR
         if not resp.content or len(resp.content) < 1000:
             logger.warning("Pollinations returned empty/too-small response")
             return None
-        # Pollinations returns JPEG; convert to PNG for consistency
-        img = Image.open(BytesIO(resp.content))
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
-        img.save(output_path, "PNG")
+        _save_response_image(resp, output_path)
         logger.info("Downloaded image from Pollinations.ai: %s", output_path)
         return output_path
     except (requests.RequestException, OSError, ValueError):
         logger.exception("Pollinations.ai generation failed")
+    return None
+
+
+def _generate_with_fal(prompt: str, output_path: Path) -> Path | None:
+    """Generate an image via Fal AI (requires FAL_KEY)."""
+    if not FAL_KEY:
+        logger.warning("FAL_KEY not set; skipping Fal AI generation")
+        return None
+
+    try:
+        import fal_client
+
+        handler = fal_client.submit(
+            FAL_MODEL,
+            arguments={
+                "prompt": prompt,
+                "image_size": "landscape_16_9",
+                "num_inference_steps": 4,
+            },
+        )
+        result = handler.get()
+        images = result.get("images", [])
+        if not images:
+            logger.warning("Fal AI returned no images")
+            return None
+        img_url = images[0].get("url")
+        if not img_url:
+            logger.warning("Fal AI image URL missing")
+            return None
+        resp = requests.get(img_url, timeout=60)
+        resp.raise_for_status()
+        _save_response_image(resp, output_path)
+        logger.info("Downloaded image from Fal AI: %s", output_path)
+        return output_path
+    except Exception:
+        logger.exception("Fal AI generation failed")
+    return None
+
+
+def _generate_image(prompt: str, output_path: Path, provider: str, width: int = TARGET_WIDTH, height: int = TARGET_HEIGHT) -> Path | None:
+    """Dispatch to the configured image generation provider."""
+    if provider == "fal":
+        return _generate_with_fal(prompt, output_path)
+    if provider == "pollinations":
+        return _generate_with_pollinations(prompt, output_path, width=width, height=height)
+    logger.warning("Unknown image provider %s", provider)
     return None
 
 
@@ -161,13 +220,7 @@ def _search_pexels(query: str, output_path: Path) -> Path | None:
                 continue
             img_resp = requests.get(src, timeout=20)
             img_resp.raise_for_status()
-            try:
-                img = Image.open(BytesIO(img_resp.content))
-                if img.mode in ("RGBA", "P"):
-                    img = img.convert("RGB")
-                img.save(output_path, "PNG")
-            except (OSError, ValueError):
-                output_path.write_bytes(img_resp.content)
+            _save_response_image(img_resp, output_path)
             logger.info("Downloaded image from Pexels: %s", output_path)
             return output_path
     except (requests.RequestException, OSError, ValueError, KeyError):
@@ -204,30 +257,33 @@ def image_for_post(
     width: int = TARGET_WIDTH,
     height: int = TARGET_HEIGHT,
     skip_og: bool = False,
-) -> Path | None:
+    provider: str | None = None,
+    item_id: str | None = None,
+) -> tuple[Path | None, str]:
     """Return a local image path for the post, using the cheapest available source."""
     if not item_url:
         return None
 
+    chosen_provider = provider or IMAGE_PROVIDER
     h = _slug(title) or _slug(item_url)
     output_path = IMAGE_DIR / f"{h}.png"
     if output_path.exists() and not skip_og:
-        return output_path
+        return output_path, "cache"
 
     # 1. Try OG image
     if not skip_og:
         og_path = output_path.with_suffix(".og.jpg")
         og = _fetch_og_image(item_url, og_path)
         if og:
-            return og
+            return og, "og"
 
-    # 2. Try Pollinations.ai free generation
+    # 2. Try configured provider generation
     prompt = prompt_for_post(day, pillar, title, linkedin_post, hashtags)
     logger.info("Image prompt: %s", prompt)
-    gen_path = output_path.with_suffix(".gen.png")
-    result = _generate_with_pollinations(prompt, gen_path, width=width, height=height)
+    gen_path = output_path.with_suffix(f".{chosen_provider}.png")
+    result = _generate_image(prompt, gen_path, chosen_provider, width=width, height=height)
     if result:
-        return result
+        return result, chosen_provider
 
     # 3. Try Pexels stock photo (if API key configured)
     pexels_query = _extract_pexels_query(day, pillar, title)
@@ -240,8 +296,18 @@ def image_for_post(
     return None
 
 
+def available_providers() -> list[str]:
+    """Return the list of image providers that are currently usable."""
+    providers = ["pollinations"]
+    if FAL_KEY:
+        providers.append("fal")
+    if PEXELS_API_KEY:
+        providers.append("pexels")
+    return providers
+
+
 if __name__ == "__main__":
-    p = image_for_post(
+    p, src = image_for_post(
         item_url="https://example.com/no-og-image-here",
         title="AI security red team visual",
         day="Friday",
@@ -250,4 +316,4 @@ if __name__ == "__main__":
         hashtags="#AISecurity",
         skip_og=False,
     )
-    print("Generated:", p)
+    print("Generated:", p, "source:", src)

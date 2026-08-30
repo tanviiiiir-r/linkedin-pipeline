@@ -17,7 +17,6 @@ from config.calendar import day_plan
 from config.settings import QUEUE_DIR, REVIEW_DIR, ensure_dirs
 from pipeline.approval import (
     approve_draft,
-    cleanup_rejected,
     edit_draft,
     list_approved,
     list_pending,
@@ -54,7 +53,7 @@ def _require_auth(handler: BaseHTTPRequestHandler) -> bool:
     try:
         decoded = base64.b64decode(auth[len(AUTH_HEADER_PREFIX) :]).decode("utf-8")
         _, provided = decoded.split(":", 1)
-    except Exception:
+    except (ValueError, UnicodeDecodeError, base64.binascii.Error):
         provided = ""
     if provided != password:
         handler.send_response(401)

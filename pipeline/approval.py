@@ -1,6 +1,6 @@
 """Human-in-the-loop approval queue."""
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from config import settings as _settings
@@ -104,9 +104,7 @@ def approve_draft(item_id: str) -> bool:
     path = _find_draft_path(item_id)
     if not path:
         # Already approved?
-        if _find_in_folder(item_id, _approved_dir()):
-            return True
-        return False
+        return bool(_find_in_folder(item_id, _approved_dir()))
     text = path.read_text()
     draft = _parse_draft_markdown(text)
     if not draft:
@@ -166,9 +164,7 @@ def skip_draft(item_id: str, skipped_dir: Path | None = None, feedback: str = ""
     path = _find_draft_path(item_id)
     if not path:
         # Already rejected?
-        if _find_in_folder(item_id, _skipped_dir()):
-            return True
-        return False
+        return bool(_find_in_folder(item_id, _skipped_dir()))
     text = path.read_text()
     draft = _parse_draft_markdown(text)
     if not draft:

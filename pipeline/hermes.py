@@ -551,7 +551,8 @@ def cmd_draft_today(args) -> int:
     target_date = _date.fromisoformat(date_override) if date_override else None
     plan = day_plan(target_date)
     dry_run = getattr(args, "dry_run", False)
-    force_comfy = getattr(args, "force_comfy", False)
+    force_generate = getattr(args, "force_generate", False)
+    image_provider = getattr(args, "image_provider", None)
 
     candidates = list_items(status="worthy", limit=args.limit * 5)
     if not candidates:
@@ -588,7 +589,8 @@ def cmd_draft_today(args) -> int:
                 pillar=plan.post_type,
                 linkedin_post=draft.linkedin_post,
                 hashtags=" ".join(draft.hashtags),
-                skip_og=force_comfy,
+                skip_og=force_generate,
+                provider=image_provider,
                 item_id=item.id,
             )
             if img_path:

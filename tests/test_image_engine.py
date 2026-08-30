@@ -1,9 +1,15 @@
 """Tests for pipeline.image_engine."""
-from pathlib import Path
 
 import pytest
 
-from pipeline.image_engine import _clean_for_prompt, image_for_post, prompt_for_post
+from pipeline.image_engine import (
+    FAL_KEY,
+    _clean_for_prompt,
+    _extract_pexels_query,
+    available_providers,
+    image_for_post,
+    prompt_for_post,
+)
 
 
 def test_clean_for_prompt_strips_urls_and_tags():
@@ -26,9 +32,22 @@ def test_prompt_for_post_matches_day_style():
     assert "cybersecurity" in security.lower() or "red-team" in security.lower()
 
 
+def test_extract_pexels_query_matches_pillar():
+    assert "cybersecurity" in _extract_pexels_query("Friday", "security_signal", "x")
+    assert "business" in _extract_pexels_query("Saturday", "founder_signal", "x")
+
+
+def test_available_providers_defaults():
+    providers = available_providers()
+    assert "pollinations" in providers
+    # fal appears only if FAL_KEY is set in env
+    if FAL_KEY:
+        assert "fal" in providers
+
+
 @pytest.mark.skip(reason="network call")
-def test_image_for_post_network():
-    p = image_for_post(
+def test_image_for_post_network_pollinations():
+    _p, src = image_for_post(
         item_url="https://example.com/no-og-image-here",
         title="AI security visual",
         day="Friday",
@@ -36,5 +55,22 @@ def test_image_for_post_network():
         linkedin_post="Security signal.",
         hashtags="#AISecurity",
         skip_og=True,
+        provider="pollinations",
     )
-    assert p is None or isinstance(p, Path)
+    assert src in {"pollinations", ""}
+
+
+@pytest.mark.skipif(not FAL_KEY, reason="FAL_KEY not configured")
+@pytest.mark.skip(reason="network call")
+def test_image_for_post_network_fal():
+    _p, src = image_for_post(
+        item_url="https://example.com/no-og-image-here",
+        title="AI security visual",
+        day="Friday",
+        pillar="security_signal",
+        linkedin_post="Security signal.",
+        hashtags="#AISecurity",
+        skip_og=True,
+        provider="fal",
+    )
+    assert src == "fal"

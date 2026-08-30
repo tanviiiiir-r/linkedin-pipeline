@@ -1,22 +1,22 @@
-"""Image generation for LinkedIn posts via RunPod ComfyUI.
+"""Image generation for LinkedIn posts.
 
-Fallback chain:
+Economic provider chain:
 1. Source article OpenGraph image (free, fast, relevant)
-2. RunPod ComfyUI Flux generation (custom, costs GPU credits)
-3. Text-only post if both fail
+2. Pollinations.ai free image generation (no API key)
+3. Pexels free stock photo search (no API key, optional)
+4. Text-only post if all image sources fail
 
-Default workflow is the existing Flux SamplerCustomAdvanced workflow extracted from
-pod output metadata, using flux1-dev.sft + t5xxl_fp8 + clip_l + ae.sft.
+RunPod/ComfyUI support is removed to avoid hourly GPU rental costs.
 """
-import json
+import html
 import logging
-import random
 import re
-import threading
-import time
+import urllib.parse
+from io import BytesIO
 from pathlib import Path
 
 import requests
+from PIL import Image
 
 from config.settings import DATA_DIR
 from pipeline.log import setup_logging
@@ -24,121 +24,15 @@ from pipeline.log import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-RUNPOD_API_KEY = __import__("os").getenv("RUNPOD_API_KEY", "")
-RUNPOD_POD_ID = __import__("os").getenv("RUNPOD_POD_ID", "")
-COMFY_PROXY_URL = __import__("os").getenv("COMFY_PROXY_URL", "")
-PAUSE_AFTER_SECONDS = int(__import__("os").getenv("PAUSE_AFTER_SECONDS", "300"))
-COMFY_INIT_DELAY_SECONDS = int(__import__("os").getenv("COMFY_INIT_DELAY_SECONDS", "300"))
+# Optional API keys (most providers below work without keys)
+PEXELS_API_KEY = __import__("os").getenv("PEXELS_API_KEY", "")
 
 IMAGE_DIR = DATA_DIR / "images"
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
-# Default Flux workflow extracted from the running pod metadata
-DEFAULT_FLUX_WORKFLOW = {
-    "6": {
-        "inputs": {
-            "text": "",
-            "clip": ["11", 0]
-        },
-        "class_type": "CLIPTextEncode",
-        "_meta": {"title": "CLIP Text Encode (Positive Prompt)"}
-    },
-    "8": {
-        "inputs": {
-            "samples": ["13", 0],
-            "vae": ["10", 0]
-        },
-        "class_type": "VAEDecode",
-        "_meta": {"title": "VAE Decode"}
-    },
-    "9": {
-        "inputs": {
-            "filename_prefix": "ComfyUI",
-            "images": ["8", 0]
-        },
-        "class_type": "SaveImage",
-        "_meta": {"title": "Save Image"}
-    },
-    "10": {
-        "inputs": {"vae_name": "ae.sft"},
-        "class_type": "VAELoader",
-        "_meta": {"title": "Load VAE"}
-    },
-    "11": {
-        "inputs": {
-            "clip_name1": "t5xxl_fp8_e4m3fn.safetensors",
-            "clip_name2": "clip_l.safetensors",
-            "type": "flux",
-            "device": "default"
-        },
-        "class_type": "DualCLIPLoader",
-        "_meta": {"title": "DualCLIPLoader"}
-    },
-    "12": {
-        "inputs": {
-            "unet_name": "flux1-dev.sft",
-            "weight_dtype": "default"
-        },
-        "class_type": "UNETLoader",
-        "_meta": {"title": "Load Diffusion Model"}
-    },
-    "13": {
-        "inputs": {
-            "noise": ["25", 0],
-            "guider": ["22", 0],
-            "sampler": ["16", 0],
-            "sigmas": ["17", 0],
-            "latent_image": ["27", 0]
-        },
-        "class_type": "SamplerCustomAdvanced",
-        "_meta": {"title": "SamplerCustomAdvanced"}
-    },
-    "16": {
-        "inputs": {"sampler_name": "euler"},
-        "class_type": "KSamplerSelect",
-        "_meta": {"title": "KSamplerSelect"}
-    },
-    "17": {
-        "inputs": {
-            "scheduler": "simple",
-            "steps": 20,
-            "denoise": 1.0,
-            "model": ["12", 0]
-        },
-        "class_type": "BasicScheduler",
-        "_meta": {"title": "BasicScheduler"}
-    },
-    "22": {
-        "inputs": {
-            "model": ["12", 0],
-            "conditioning": ["26", 0]
-        },
-        "class_type": "BasicGuider",
-        "_meta": {"title": "BasicGuider"}
-    },
-    "25": {
-        "inputs": {"noise_seed": 0},
-        "class_type": "RandomNoise",
-        "_meta": {"title": "RandomNoise"}
-    },
-    "26": {
-        "inputs": {
-            "guidance": 3.5,
-            "conditioning": ["6", 0]
-        },
-        "class_type": "FluxGuidance",
-        "_meta": {"title": "FluxGuidance"}
-    },
-    "27": {
-        "inputs": {
-            "width": 1216,
-            "height": 704,
-            "batch_size": 1
-        },
-        "class_type": "EmptySD3LatentImage",
-        "_meta": {"title": "EmptySD3LatentImage"}
-    }
-}
+# Target LinkedIn feed aspect ratio ~1.91:1
+TARGET_WIDTH = 1200
+TARGET_HEIGHT = 627
 
 
 def _slug(text: str) -> str:
@@ -152,7 +46,6 @@ def _clean_for_prompt(text: str) -> str:
     text = re.sub(r"\*+", "", text)
     text = re.sub(r"\n+", ". ", text)
     text = re.sub(r"\s+", " ", text)
-    # Truncate long posts to first 200 chars for prompt
     return text.strip()[:240]
 
 
@@ -164,7 +57,7 @@ def prompt_for_post(day: str, pillar: str, title: str, linkedin_post: str, hasht
 
     style_fragments = []
     if "tool" in pillar_lower or "monday" in day_lower:
-        style_fragments.append("clean abstract SaaS product hero card, dark mode, single icon plus tool-name area, minimal, 1.91:1 landscape")
+        style_fragments.append("clean abstract SaaS product hero card, dark mode, single icon, minimal, 1.91:1 landscape")
     elif "viral" in pillar_lower or "tuesday" in day_lower:
         style_fragments.append("bold news-style editorial header, one strong visual metaphor, dynamic diagonal composition, glowing neural shapes, 1.91:1 landscape")
     elif "pattern" in pillar_lower or "wednesday" in day_lower:
@@ -182,7 +75,6 @@ def prompt_for_post(day: str, pillar: str, title: str, linkedin_post: str, hasht
 
     style = ", ".join(style_fragments)
 
-    # Extract brand/entity if present
     entities = re.findall(r"\b(AWS|Google|OpenAI|Anthropic|Meta|Microsoft|NVIDIA|Pinterest|Cloudflare|Amazon|DeepMind|Gemini|Nvidia)\b", base)
     entity_clause = ""
     if entities:
@@ -192,158 +84,114 @@ def prompt_for_post(day: str, pillar: str, title: str, linkedin_post: str, hasht
         f"Professional LinkedIn post header image about {base}. "
         f"{style}.{entity_clause} "
         "Completely free of text, letters, numbers, logos, watermarks, trademarks, UI chrome, and readable labels. "
-        "High quality, 8k, photorealistic or clean vector illustration, centered composition, safe for business audience."
+        "High quality, centered composition, safe for business audience."
     )
     return prompt
 
 
-def _runpod_graphql(query: str, variables: dict | None = None) -> dict:
-    if not RUNPOD_API_KEY:
-        raise RuntimeError("RUNPOD_API_KEY not set")
-    resp = requests.post(
-        "https://api.runpod.io/graphql",
-        headers={"Authorization": f"Bearer {RUNPOD_API_KEY}"},
-        json={"query": query, "variables": variables or {}},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json()
-
-
-def pod_status() -> str:
-    data = _runpod_graphql("query Pods { myself { pods { id desiredStatus } } }")
-    for pod in data.get("data", {}).get("myself", {}).get("pods", []):
-        if pod["id"] == RUNPOD_POD_ID:
-            return pod["desiredStatus"]
-    return "UNKNOWN"
-
-
-def resume_pod() -> None:
-    logger.info("Resuming RunPod pod %s", RUNPOD_POD_ID)
-    query = """
-    mutation PodResume($input: PodResumeInput!) {
-      podResume(input: $input) { id desiredStatus }
-    }
-    """
-    _runpod_graphql(query, {"input": {"podId": RUNPOD_POD_ID}})
-
-
-def stop_pod() -> None:
-    logger.info("Stopping RunPod pod %s", RUNPOD_POD_ID)
-    query = """
-    mutation PodStop($input: PodStopInput!) {
-      podStop(input: $input) { id desiredStatus }
-    }
-    """
-    _runpod_graphql(query, {"input": {"podId": RUNPOD_POD_ID}})
-
-
-def _wait_for_running(timeout: int = 300) -> bool:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        status = pod_status()
-        logger.info("Pod status: %s", status)
-        if status == "RUNNING":
-            return True
-        time.sleep(5)
-    return False
-
-
-def _wait_for_comfy_init() -> None:
-    """Pause briefly after the pod starts so ComfyUI can finish loading models."""
-    delay = max(0, COMFY_INIT_DELAY_SECONDS)
-    if delay:
-        logger.info("Waiting %ss for ComfyUI to finish initializing", delay)
-        time.sleep(delay)
-
-
-def _schedule_stop() -> None:
-    if not PAUSE_AFTER_SECONDS:
-        return
-
-    def _do_stop():
-        time.sleep(PAUSE_AFTER_SECONDS)
-        try:
-            stop_pod()
-        except Exception:
-            logger.exception("Failed to stop RunPod pod")
-
-    threading.Thread(target=_do_stop, daemon=True).start()
-
-
-def _generate_with_comfy(prompt: str, output_path: Path, width: int = 1216, height: int = 704) -> Path | None:
-    if not COMFY_PROXY_URL:
-        logger.warning("COMFY_PROXY_URL not set; skipping ComfyUI generation")
-        return None
-
-    workflow = json.loads(json.dumps(DEFAULT_FLUX_WORKFLOW))  # deep copy
-    workflow["6"]["inputs"]["text"] = prompt
-    workflow["27"]["inputs"]["width"] = width
-    workflow["27"]["inputs"]["height"] = height
-    workflow["25"]["inputs"]["noise_seed"] = random.randint(0, 1_000_000_000_000)
-
-    # Submit
-    submit_resp = requests.post(
-        f"{COMFY_PROXY_URL}/prompt",
-        json={"prompt": workflow},
-        timeout=30,
-    )
-    submit_resp.raise_for_status()
-    submit_data = submit_resp.json()
-    prompt_id = submit_data.get("prompt_id")
-    if not prompt_id:
-        logger.error("No prompt_id returned: %s", submit_data)
-        return None
-    logger.info("ComfyUI prompt submitted: %s", prompt_id)
-
-    # Poll history
-    history_url = f"{COMFY_PROXY_URL}/history/{prompt_id}"
-    for attempt in range(120):
-        hist_resp = requests.get(history_url, timeout=30)
-        hist_resp.raise_for_status()
-        hist = hist_resp.json()
-        entry = hist.get(prompt_id)
-        if entry and entry.get("outputs"):
-            outputs = entry["outputs"]
-            for node_outputs in outputs.values():
-                for img in node_outputs.get("images", []):
-                    filename = img["filename"]
-                    subfolder = img.get("subfolder", "")
-                    view_url = f"{COMFY_PROXY_URL}/view?filename={filename}&subfolder={subfolder}&type=output"
-                    img_resp = requests.get(view_url, timeout=120)
-                    img_resp.raise_for_status()
-                    output_path.write_bytes(img_resp.content)
-                    logger.info("Downloaded image from ComfyUI: %s", output_path)
-                    return output_path
-            # If outputs present but no images, generation may have failed
-            logger.warning("ComfyUI outputs without images: %s", outputs)
-            return None
-        logger.debug("Polling ComfyUI history attempt %s", attempt)
-        time.sleep(5)
-
-    logger.error("ComfyUI generation timed out for prompt %s", prompt_id)
-    return None
-
-
 def _fetch_og_image(url: str, output_path: Path) -> Path | None:
+    """Try to download the source article's OpenGraph image."""
     try:
         page_resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         page_resp.raise_for_status()
-        html = page_resp.text
-        m = re.search(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', html, re.IGNORECASE)
+        html_text = page_resp.text
+        m = re.search(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', html_text, re.IGNORECASE)
         if not m:
-            m = re.search(r'<meta[^>]+name="twitter:image"[^>]+content="([^"]+)"', html, re.IGNORECASE)
+            m = re.search(r'<meta[^>]+name="twitter:image"[^>]+content="([^"]+)"', html_text, re.IGNORECASE)
         if not m:
             return None
-        img_url = m.group(1)
+        img_url = html.unescape(m.group(1))
         img_resp = requests.get(img_url, timeout=20)
         img_resp.raise_for_status()
-        output_path.write_bytes(img_resp.content)
+        try:
+            img = Image.open(BytesIO(img_resp.content))
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            img.save(output_path, "PNG")
+        except (OSError, ValueError):
+            output_path.write_bytes(img_resp.content)
         logger.info("Downloaded OG image: %s", output_path)
         return output_path
     except Exception:
         logger.exception("OG image fetch failed for %s", url)
     return None
+
+
+def _generate_with_pollinations(prompt: str, output_path: Path, width: int = TARGET_WIDTH, height: int = TARGET_HEIGHT) -> Path | None:
+    """Generate an image via Pollinations.ai (free, no API key)."""
+    encoded = urllib.parse.quote(prompt)
+    url = (
+        f"https://image.pollinations.ai/prompt/{encoded}"
+        f"?width={width}&height={height}"
+        f"&nologo=true"
+        f"&negative_prompt=text,words,letters,numbers,logo,watermark,trademark,UI,labels,signature"
+    )
+    try:
+        resp = requests.get(url, timeout=120)
+        resp.raise_for_status()
+        if not resp.content or len(resp.content) < 1000:
+            logger.warning("Pollinations returned empty/too-small response")
+            return None
+        # Pollinations returns JPEG; convert to PNG for consistency
+        img = Image.open(BytesIO(resp.content))
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        img.save(output_path, "PNG")
+        logger.info("Downloaded image from Pollinations.ai: %s", output_path)
+        return output_path
+    except (requests.RequestException, OSError, ValueError):
+        logger.exception("Pollinations.ai generation failed")
+    return None
+
+
+def _search_pexels(query: str, output_path: Path) -> Path | None:
+    """Search Pexels for a free stock photo matching the query."""
+    if not PEXELS_API_KEY:
+        return None
+    try:
+        headers = {"Authorization": PEXELS_API_KEY}
+        params = {"query": query, "per_page": 5, "orientation": "landscape"}
+        resp = requests.get("https://api.pexels.com/v1/search", headers=headers, params=params, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+        photos = data.get("photos", [])
+        for photo in photos:
+            src = photo.get("src", {}).get("large") or photo.get("src", {}).get("medium")
+            if not src:
+                continue
+            img_resp = requests.get(src, timeout=20)
+            img_resp.raise_for_status()
+            try:
+                img = Image.open(BytesIO(img_resp.content))
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")
+                img.save(output_path, "PNG")
+            except (OSError, ValueError):
+                output_path.write_bytes(img_resp.content)
+            logger.info("Downloaded image from Pexels: %s", output_path)
+            return output_path
+    except (requests.RequestException, OSError, ValueError, KeyError):
+        logger.exception("Pexels search failed")
+    return None
+
+
+def _extract_pexels_query(day: str, pillar: str, title: str) -> str:
+    """Create a simple search query for Pexels from post metadata."""
+    if "security" in pillar.lower():
+        return "cybersecurity technology dark"
+    if "founder" in pillar.lower():
+        return "business strategy office laptop"
+    if "tool" in pillar.lower():
+        return "software technology dashboard"
+    if "builder" in pillar.lower():
+        return "developer coding workspace"
+    if "tomorrow" in pillar.lower():
+        return "futuristic technology horizon"
+    if "viral" in pillar.lower():
+        return "technology innovation abstract"
+    if "pattern" in pillar.lower():
+        return "network technology abstract"
+    return "technology abstract"
 
 
 def image_for_post(
@@ -353,14 +201,14 @@ def image_for_post(
     pillar: str,
     linkedin_post: str,
     hashtags: str,
-    width: int = 1216,
-    height: int = 704,
-    skip_comfy: bool = False,
+    width: int = TARGET_WIDTH,
+    height: int = TARGET_HEIGHT,
     skip_og: bool = False,
 ) -> Path | None:
-    """Return a local image path for the post, using OG first then ComfyUI."""
+    """Return a local image path for the post, using the cheapest available source."""
     if not item_url:
         return None
+
     h = _slug(title) or _slug(item_url)
     output_path = IMAGE_DIR / f"{h}.png"
     if output_path.exists() and not skip_og:
@@ -373,43 +221,33 @@ def image_for_post(
         if og:
             return og
 
-    if skip_comfy:
-        return None
-
-    # 2. Try ComfyUI generation
-    if not RUNPOD_API_KEY or not COMFY_PROXY_URL:
-        logger.warning("RunPod/ComfyUI not configured")
-        return None
-
+    # 2. Try Pollinations.ai free generation
     prompt = prompt_for_post(day, pillar, title, linkedin_post, hashtags)
     logger.info("Image prompt: %s", prompt)
-
-    try:
-        status = pod_status()
-        if status != "RUNNING":
-            resume_pod()
-            if not _wait_for_running():
-                logger.error("RunPod pod did not start in time")
-                return None
-            _wait_for_comfy_init()
-        result = _generate_with_comfy(prompt, output_path, width=width, height=height)
+    gen_path = output_path.with_suffix(".gen.png")
+    result = _generate_with_pollinations(prompt, gen_path, width=width, height=height)
+    if result:
         return result
-    except Exception:
-        logger.exception("ComfyUI generation failed")
-        return None
-    finally:
-        _schedule_stop()
+
+    # 3. Try Pexels stock photo (if API key configured)
+    pexels_query = _extract_pexels_query(day, pillar, title)
+    pexels_path = output_path.with_suffix(".pexels.jpg")
+    result = _search_pexels(pexels_query, pexels_path)
+    if result:
+        return result
+
+    logger.warning("All image sources failed for %s", title)
+    return None
 
 
 if __name__ == "__main__":
-    # Quick manual test
     p = image_for_post(
-        item_url="https://example.com/test",
+        item_url="https://example.com/no-og-image-here",
         title="AI security red team visual",
         day="Friday",
         pillar="security_signal",
-        linkedin_post="Red team finding about prompt injection.",
+        linkedin_post="Google Cloud CISO on AI security fundamentals.",
         hashtags="#AISecurity",
-        skip_comfy=False,
+        skip_og=False,
     )
     print("Generated:", p)

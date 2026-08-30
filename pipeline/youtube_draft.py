@@ -16,6 +16,7 @@ import requests
 
 from config.settings import QUEUE_DIR
 from pipeline.drafting import Draft, save_draft
+from pipeline.image_engine import image_for_post
 from pipeline.llm_client import draft_from_summary, summarize_text
 from pipeline.scoring import ScoreResult, score_item
 from pipeline.storage import Item, item_exists, save_item
@@ -168,6 +169,32 @@ def draft_from_youtube_url(url: str) -> Draft | None:
         draft = _build_draft_from_llm(item, score, generated)
     else:
         draft = draft_item(item, score)
+
+    # Generate an image for YouTube drafts (no useful OG on watch pages)
+    try:
+        from config.calendar import day_plan
+        plan = day_plan()
+        img_path, img_source = image_for_post(
+            item_url=item.item_url,
+            title=draft.title,
+            day=plan.day_name,
+            pillar=draft.pillar or "viral_explained",
+            linkedin_post=draft.linkedin_post,
+            hashtags=" ".join(draft.hashtags),
+            skip_og=True,
+            item_id=item.id,
+        )
+        if img_path:
+            draft.image_path = str(img_path)
+            draft.image_source = img_source
+            item.image_path = str(img_path)
+            item.image_source = img_source
+            try:
+                save_item(item)
+            except (OSError, RuntimeError):
+                logger.exception("Failed to persist YouTube item image_path")
+    except Exception:
+        logger.exception("Image generation failed for YouTube draft %s", item.id)
 
     save_draft(draft, queue_dir=QUEUE_DIR)
     return draft

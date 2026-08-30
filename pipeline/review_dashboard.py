@@ -7,13 +7,11 @@ from __future__ import annotations
 
 import html
 import logging
-import shutil
 from pathlib import Path
 
 from config.calendar import day_plan
 from config.settings import QUEUE_DIR, REVIEW_DIR, ensure_dirs
 from pipeline.approval import list_pending
-from pipeline.drafting import Draft
 
 logger = logging.getLogger(__name__)
 
@@ -31,21 +29,57 @@ def _ensure_assets() -> None:
     (_js := _asset_path("app.js")).write_text(_JS)
 
 
+def _detect_image_extension(path: Path) -> str:
+    """Return the real file extension based on image content, not the filename."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            fmt = im.format
+            if fmt == "JPEG":
+                return ".jpg"
+            if fmt == "PNG":
+                return ".png"
+            if fmt == "WEBP":
+                return ".webp"
+            if fmt == "GIF":
+                return ".gif"
+    except (OSError, ImportError, ValueError):
+        logger.debug("Could not detect image format for %s", path)
+    return path.suffix.lower() or ".png"
+
+
+def _normalize_image(src: Path, dest: Path) -> Path | None:
+    """Copy an image to dest, converting to JPEG if dest extension is .jpg."""
+    try:
+        from PIL import Image
+        with Image.open(src) as im:
+            ext = dest.suffix.lower()
+            if ext == ".jpg" or ext == ".jpeg":
+                rgb = im.convert("RGB")
+                rgb.save(dest, "JPEG", quality=90)
+            else:
+                im.save(dest, im.format or "PNG")
+        return dest
+    except Exception:
+        logger.exception("Failed to normalize image %s to %s", src, dest)
+    return None
+
+
 def _copy_image_for_review(image_path: str, item_id: str) -> str | None:
     if not image_path:
         return None
     src = Path(image_path)
     if not src.exists():
         return None
-    ext = src.suffix or ".png"
+    ext = _detect_image_extension(src)
     dest = REVIEW_IMAGES_DIR / f"{item_id}{ext}"
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
-        shutil.copy2(src, dest)
+        if _normalize_image(src, dest):
+            return str(dest.relative_to(REVIEW_DIR))
     except OSError:
         logger.exception("Failed to copy image %s to review dir", src)
-        return None
-    return str(dest.relative_to(REVIEW_DIR))
+    return None
 
 
 def _score_color(score: int) -> str:
@@ -78,12 +112,13 @@ def generate_dashboard() -> Path:
                 continue
             try:
                 rel = cand_path.relative_to(REVIEW_DIR)
-                dest = REVIEW_IMAGES_DIR / rel.name
+                ext = _detect_image_extension(cand_path)
+                dest = REVIEW_IMAGES_DIR / (rel.stem + ext)
             except ValueError:
-                ext = cand_path.suffix or ".jpg"
+                ext = _detect_image_extension(cand_path)
                 dest = REVIEW_IMAGES_DIR / f"{draft.item_id}_cand_{len(list(REVIEW_IMAGES_DIR.glob(f'{draft.item_id}*')))}{ext}"
             try:
-                shutil.copy2(cand_path, dest)
+                _normalize_image(cand_path, dest)
             except OSError:
                 logger.exception("Failed to copy candidate image %s", cand_path)
 
@@ -387,7 +422,7 @@ _JS = '''(function() {
   }
 
   function activeImageUrl(draft) {
-    if (draft.image_url) return draft.image_url;
+    if (draft.image_url) return draft.image_url.replace(/^\\//, '');
     const m = (draft.image_path || '').match(/(\\.[^.\\/]+)$/);
     const ext = m ? m[1] : '.jpg';
     return 'images/' + draft.item_id + ext;

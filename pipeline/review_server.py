@@ -5,10 +5,12 @@ editing, regenerating images, and listing drafts by status.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 import mimetypes
-import shutil
+import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -17,7 +19,6 @@ from config.calendar import day_plan
 from config.settings import QUEUE_DIR, REVIEW_DIR, ensure_dirs
 from pipeline.approval import (
     approve_draft,
-    cleanup_rejected,
     edit_draft,
     list_approved,
     list_pending,
@@ -49,12 +50,10 @@ def _require_auth(handler: BaseHTTPRequestHandler) -> bool:
         handler.send_header("WWW-Authenticate", 'Basic realm="Review"')
         handler.end_headers()
         return False
-    import base64
-
     try:
         decoded = base64.b64decode(auth[len(AUTH_HEADER_PREFIX) :]).decode("utf-8")
         _, provided = decoded.split(":", 1)
-    except Exception:
+    except (ValueError, UnicodeDecodeError, binascii.Error):
         provided = ""
     if provided != password:
         handler.send_response(401)
@@ -68,6 +67,9 @@ def _read_json(handler: BaseHTTPRequestHandler) -> dict:
     length = int(handler.headers.get("Content-Length", 0))
     if not length:
         return {}
+    # Cap body size to avoid memory exhaustion (1 MB)
+    max_len = 1_048_576
+    length = min(length, max_len)
     try:
         return json.loads(handler.rfile.read(length).decode("utf-8")) or {}
     except json.JSONDecodeError:
@@ -83,21 +85,57 @@ def _json_response(handler: BaseHTTPRequestHandler, code: int, data: dict) -> No
     handler.wfile.write(body)
 
 
+def _detect_image_extension(path: Path) -> str:
+    """Return the real file extension based on image content, not the filename."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            fmt = im.format
+            if fmt == "JPEG":
+                return ".jpg"
+            if fmt == "PNG":
+                return ".png"
+            if fmt == "WEBP":
+                return ".webp"
+            if fmt == "GIF":
+                return ".gif"
+    except (OSError, ImportError, ValueError):
+        logger.debug("Could not detect image format for %s", path)
+    return path.suffix.lower() or ".png"
+
+
+def _normalize_image(src: Path, dest: Path) -> Path | None:
+    """Copy an image to dest, converting to JPEG if dest extension is .jpg."""
+    try:
+        from PIL import Image
+        with Image.open(src) as im:
+            ext = dest.suffix.lower()
+            if ext == ".jpg" or ext == ".jpeg":
+                rgb = im.convert("RGB")
+                rgb.save(dest, "JPEG", quality=90)
+            else:
+                im.save(dest, im.format or "PNG")
+        return dest
+    except Exception:
+        logger.exception("Failed to normalize image %s to %s", src, dest)
+    return None
+
+
 def _copy_image_for_review(image_path: str, item_id: str) -> str | None:
     if not image_path:
         return None
     src = Path(image_path)
     if not src.exists():
         return None
-    ext = src.suffix or ".png"
+    ext = _detect_image_extension(src)
     dest = REVIEW_IMAGES_DIR / f"{item_id}{ext}"
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
-        shutil.copy2(src, dest)
+        if _normalize_image(src, dest):
+            return str(dest.relative_to(REVIEW_DIR))
     except OSError:
         logger.exception("Failed to copy image %s to review dir", src)
-        return None
-    return str(dest.relative_to(REVIEW_DIR))
+    return None
 
 
 def _draft_to_json(draft: Draft, analysis: dict | None = None, status: str = "pending") -> dict:
@@ -106,14 +144,14 @@ def _draft_to_json(draft: Draft, analysis: dict | None = None, status: str = "pe
     for cand in draft.image_candidates or []:
         cand_path = Path(cand)
         if cand_path.is_absolute() and cand_path.exists():
-            ext = cand_path.suffix or ".jpg"
+            ext = _detect_image_extension(cand_path)
             dest = REVIEW_IMAGES_DIR / f"{draft.item_id}_cand_{len(candidates_rel)}{ext}"
             REVIEW_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
             try:
-                shutil.copy2(cand_path, dest)
+                if _normalize_image(cand_path, dest):
+                    candidates_rel.append(str(dest.relative_to(REVIEW_DIR)))
             except OSError:
                 continue
-            candidates_rel.append(str(dest.relative_to(REVIEW_DIR)))
         elif (REVIEW_DIR / cand).exists():
             candidates_rel.append(cand)
 
@@ -362,9 +400,12 @@ Return ONLY the rewritten LinkedIn post text (no markdown, no JSON, no explanati
             return
         # Copy selected candidate to IMAGE_DIR with predictable slug
         slug = _slug(draft.title) or item_id
-        dest = IMAGE_DIR / f"{slug}.jpg"
+        ext = _detect_image_extension(candidate_path)
+        dest = IMAGE_DIR / f"{slug}{ext}"
         try:
-            shutil.copy2(candidate_path, dest)
+            if not _normalize_image(candidate_path, dest):
+                _json_response(self, 500, {"ok": False, "error": "copy failed: could not normalize image"})
+                return
         except OSError as exc:
             _json_response(self, 500, {"ok": False, "error": f"copy failed: {exc}"})
             return
@@ -372,11 +413,10 @@ Return ONLY the rewritten LinkedIn post text (no markdown, no JSON, no explanati
         draft.image_source = "article"
         _persist_draft(draft, path)
         # Copy into review images dir for dashboard preview
-        ext = dest.suffix or ".jpg"
         review_dest = REVIEW_IMAGES_DIR / f"{item_id}{ext}"
         REVIEW_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
         try:
-            shutil.copy2(dest, review_dest)
+            _normalize_image(dest, review_dest)
         except OSError:
             logger.exception("Failed to copy selected image to review dir")
         rel = str(review_dest.relative_to(REVIEW_DIR))
@@ -415,6 +455,7 @@ Return ONLY the rewritten LinkedIn post text (no markdown, no JSON, no explanati
                 hashtags=" ".join(draft.hashtags),
                 skip_og=True,
                 item_id=item.id,
+                force=True,
             )
         except Exception as exc:
             logger.exception("Image regeneration failed for %s", item_id)
@@ -437,11 +478,11 @@ Return ONLY the rewritten LinkedIn post text (no markdown, no JSON, no explanati
         _persist_draft(draft, path)
 
         # Copy into review images dir for the dashboard preview
-        ext = img_path.suffix or ".png"
+        ext = _detect_image_extension(img_path)
         dest = REVIEW_IMAGES_DIR / f"{item_id}{ext}"
         REVIEW_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
         try:
-            shutil.copy2(img_path, dest)
+            _normalize_image(img_path, dest)
         except OSError:
             logger.exception("Failed to copy regenerated image to review dir")
 
@@ -498,8 +539,6 @@ def run_server(host: str = "127.0.0.1", port: int = 8080) -> None:
         print("\nShutting down review server.")
         server.shutdown()
 
-
-import os
 
 if __name__ == "__main__":
     run_server()

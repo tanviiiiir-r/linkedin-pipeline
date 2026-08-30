@@ -403,6 +403,15 @@ def _absolute_url(base: str, src: str) -> str | None:
     return urljoin(base, src)
 
 
+def _is_usable_size(path: Path, min_width: int = 400, min_height: int = 200) -> bool:
+    """Check downloaded image has usable dimensions for a LinkedIn feed image."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            return im.width >= min_width and im.height >= min_height
+    except (OSError, ImportError, ValueError):
+        return False
+
 def _is_large_enough(img) -> bool:
     """Reject tiny icons, avatars, and tracking pixels."""
     try:
@@ -466,7 +475,7 @@ def extract_article_images(url: str, item_id: str, max_candidates: int = 4) -> l
                     suffix = ".jpg"
                 name = f"article_{len(found)}{suffix}"
                 path = _download_image(abs_url, candidates_dir / name)
-                if path and str(path) not in found:
+                if path and str(path) not in found and _is_usable_size(path):
                     found.append(str(path))
     except (requests.exceptions.RequestException, OSError):
         logger.exception("Article image extraction failed for %s", url)
@@ -533,6 +542,7 @@ def image_for_post(
     skip_comfy: bool = False,
     skip_og: bool = False,
     item_id: str = "",
+    force: bool = False,
 ) -> tuple[Path | None, str]:
     """Return a local image path for the post and its source label.
 
@@ -546,8 +556,11 @@ def image_for_post(
         return None, "none"
     h = _slug(title) or _slug(item_url)
     output_path = IMAGE_DIR / f"{h}.png"
-    if output_path.exists() and not skip_og:
-        return output_path, "unknown"
+    if output_path.exists() and not skip_og and not force:
+        # If cached image is too small, ignore it and regenerate
+        if _is_usable_size(output_path):
+            return output_path, "unknown"
+        logger.warning("Cached image too small, ignoring: %s", output_path)
 
     # 1. Use pre-downloaded article candidates if available
     if item_id and IMAGE_CANDIDATES_DIR.exists():
@@ -555,6 +568,9 @@ def image_for_post(
         if candidates_dir.exists():
             for cand in sorted(candidates_dir.iterdir()):
                 if cand.is_file() and cand.suffix.lower() in (".jpg", ".jpeg", ".png"):
+                    if not _is_usable_size(cand):
+                        logger.debug("Skipping too-small candidate: %s", cand)
+                        continue
                     logger.info("Using pre-fetched article image: %s", cand)
                     return cand, "article"
 
@@ -562,7 +578,7 @@ def image_for_post(
     if not skip_og:
         og_path = output_path.with_suffix(".og.jpg")
         og = _fetch_og_image(item_url, og_path)
-        if og:
+        if og and _is_usable_size(og):
             return og, "og"
 
     if skip_comfy:

@@ -120,11 +120,25 @@ def _normalize_image(src: Path, dest: Path) -> Path | None:
     return None
 
 
+def _is_usable_size(path: Path, min_width: int = 400, min_height: int = 200) -> bool:
+    """Check that a local image has usable dimensions for the LinkedIn feed."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            w, h = im.size
+            return w >= min_width and h >= min_height
+    except (OSError, ImportError, ValueError):
+        return False
+
+
 def _copy_image_for_review(image_path: str, item_id: str) -> str | None:
     if not image_path:
         return None
     src = Path(image_path)
     if not src.exists():
+        return None
+    if not _is_usable_size(src):
+        logger.warning("Skipping unusable image for %s: %s", item_id, src)
         return None
     ext = _detect_image_extension(src)
     dest = REVIEW_IMAGES_DIR / f"{item_id}{ext}"
@@ -143,6 +157,9 @@ def _draft_to_json(draft: Draft, analysis: dict | None = None, status: str = "pe
     for cand in draft.image_candidates or []:
         cand_path = Path(cand)
         if cand_path.is_absolute() and cand_path.exists():
+            if not _is_usable_size(cand_path):
+                logger.warning("Skipping unusable candidate image for %s: %s", draft.item_id, cand_path)
+                continue
             ext = _detect_image_extension(cand_path)
             dest = REVIEW_IMAGES_DIR / f"{draft.item_id}_cand_{len(candidates_rel)}{ext}"
             REVIEW_IMAGES_DIR.mkdir(parents=True, exist_ok=True)

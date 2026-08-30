@@ -65,11 +65,25 @@ def _normalize_image(src: Path, dest: Path) -> Path | None:
     return None
 
 
+def _is_usable_size(path: Path, min_width: int = 400, min_height: int = 200) -> bool:
+    """Check that a local image has usable dimensions for the LinkedIn feed."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            w, h = im.size
+            return w >= min_width and h >= min_height
+    except (OSError, ImportError, ValueError):
+        return False
+
+
 def _copy_image_for_review(image_path: str, item_id: str) -> str | None:
     if not image_path:
         return None
     src = Path(image_path)
     if not src.exists():
+        return None
+    if not _is_usable_size(src):
+        logger.warning("Skipping unusable image for %s: %s", item_id, src)
         return None
     ext = _detect_image_extension(src)
     dest = REVIEW_IMAGES_DIR / f"{item_id}{ext}"
@@ -109,6 +123,9 @@ def generate_dashboard() -> Path:
         for cand in draft.image_candidates or []:
             cand_path = Path(cand)
             if not cand_path.exists():
+                continue
+            if not _is_usable_size(cand_path):
+                logger.warning("Skipping unusable candidate image for %s: %s", draft.item_id, cand_path)
                 continue
             try:
                 rel = cand_path.relative_to(REVIEW_DIR)
@@ -375,6 +392,117 @@ h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+
+/* Image gallery modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+.modal-panel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 960px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.modal-title { font-size: 16px; font-weight: 600; }
+.modal-close {
+  background: transparent;
+  border: none;
+  color: var(--mut);
+  font-size: 24px;
+  cursor: pointer;
+}
+.modal-body {
+  overflow-y: auto;
+  padding: 20px;
+}
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+.gallery-card {
+  background: var(--surface);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.1s ease, border-color 0.15s ease;
+}
+.gallery-card:hover { transform: translateY(-2px); border-color: var(--line); }
+.gallery-card.active { border-color: var(--ok); }
+.gallery-card img {
+  width: 100%;
+  aspect-ratio: 1.91 / 1;
+  object-fit: cover;
+  display: block;
+}
+.gallery-meta {
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.gallery-source {
+  font-size: 11px;
+  color: var(--mut);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.gallery-actions { display: flex; gap: 8px; }
+.gallery-actions .btn { padding: 6px 12px; font-size: 13px; }
+
+/* Candidate strip */
+.candidate-strip {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+.candidate-thumb {
+  position: relative;
+  width: 120px;
+  height: 70px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  cursor: pointer;
+  background: var(--surface);
+}
+.candidate-thumb.active { border-color: var(--ok); }
+.candidate-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.candidate-thumb .more {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 footer { border-top: 1px solid var(--line); margin-top: 32px; padding: 20px 0 48px; }
 .note { color: var(--mut); font-size: 13px; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--surface); padding: 2px 6px; border-radius: 5px; }
@@ -446,6 +574,20 @@ _JS = '''(function() {
     if (banner) banner.remove();
   }
 
+  function candidateSourceLabel(candidate) {
+    if (!candidate) return 'unknown';
+    const lower = candidate.toLowerCase();
+    if (lower.includes('og.jpg') || lower.includes('article_')) return 'article';
+    if (lower.includes('unsplash')) return 'stock';
+    if (lower.includes('environment')) return 'AI · environment';
+    if (lower.includes('message')) return 'AI · message';
+    if (lower.includes('focus')) return 'AI · focus';
+    if (lower.includes('pov')) return 'AI · POV';
+    if (lower.includes('pollinations')) return 'AI';
+    if (lower.includes('fal')) return 'AI';
+    return 'image';
+  }
+
   function renderCandidates(draft) {
     const candidates = (draft.image_candidates || []).filter(c => c.startsWith('images/'));
     if (!candidates.length) return null;
@@ -453,30 +595,36 @@ _JS = '''(function() {
     wrap.className = 'candidate-row';
     const label = document.createElement('div');
     label.className = 'candidate-label';
-    label.textContent = 'Choose image';
+    label.textContent = 'Image options (' + candidates.length + ') · click to open gallery';
     wrap.appendChild(label);
-    const thumbs = document.createElement('div');
-    thumbs.className = 'candidate-thumbs';
+
+    const strip = document.createElement('div');
+    strip.className = 'candidate-strip';
     const active = activeImageUrl(draft);
-    candidates.forEach(c => {
-      const lbl = document.createElement('label');
-      lbl.className = 'candidate-thumb' + (c === active ? ' active' : '');
-      lbl.title = c;
-      const input = document.createElement('input');
-      input.type = 'radio';
-      input.name = 'img-' + draft.item_id;
-      input.value = c;
-      if (c === active) input.checked = true;
-      input.onchange = () => selectImage(draft.item_id, c);
+    const visible = candidates.slice(0, 3);
+    visible.forEach(c => {
+      const thumb = document.createElement('div');
+      thumb.className = 'candidate-thumb' + (stripQuery(c) === stripQuery(active) ? ' active' : '');
+      thumb.title = candidateSourceLabel(c);
+      thumb.onclick = () => openImageGallery(draft.item_id);
       const img = document.createElement('img');
       img.src = c;
       img.alt = '';
       img.loading = 'lazy';
-      lbl.appendChild(input);
-      lbl.appendChild(img);
-      thumbs.appendChild(lbl);
+      thumb.appendChild(img);
+      strip.appendChild(thumb);
     });
-    wrap.appendChild(thumbs);
+    if (candidates.length > 3) {
+      const more = document.createElement('div');
+      more.className = 'candidate-thumb';
+      more.onclick = () => openImageGallery(draft.item_id);
+      const overlay = document.createElement('div');
+      overlay.className = 'more';
+      overlay.textContent = '+' + (candidates.length - 3);
+      more.appendChild(overlay);
+      strip.appendChild(more);
+    }
+    wrap.appendChild(strip);
     return wrap;
   }
 
@@ -548,7 +696,11 @@ _JS = '''(function() {
     if (imgUrl) {
       const imgBox = document.createElement('div');
       imgBox.className = 'ln-image';
+      imgBox.style.cursor = 'pointer';
+      imgBox.title = 'Click to change image';
+      imgBox.onclick = () => openImageGallery(draft.item_id);
       const img = document.createElement('img');
+      img.id = 'active-img-' + draft.item_id;
       img.src = imgUrl;
       img.alt = '';
       img.loading = 'lazy';
@@ -728,7 +880,8 @@ _JS = '''(function() {
     try {
       const data = await getApi('/drafts?status=' + currentTab);
       if (!data.ok) throw new Error(data.error || 'Failed to load drafts');
-      const drafts = data.drafts || [];
+      currentDrafts = data.drafts || [];
+      const drafts = currentDrafts;
       const counter = document.getElementById('counter');
       if (counter) counter.textContent = drafts.length + ' / ' + data.total;
       app.innerHTML = '';
@@ -803,13 +956,19 @@ _JS = '''(function() {
     }
   }
 
-  async function selectImage(id, candidate) {
+  async function selectImage(id, candidate, fromGallery) {
     try {
       setStatus('<span class="spinner"></span> Selecting image…', 'running');
-      await postApi('/select-image', {item_id: id, candidate});
-      await loadDrafts();
+      const data = await postApi('/select-image', {item_id: id, candidate});
+      if (!data.ok) throw new Error(data.error || 'selection failed');
+      updateActiveImage(id, data.image_url ? data.image_url.replace(/^\\//, '') : candidate);
       setStatus('Image selected', 'success');
       setTimeout(clearStatus, 2000);
+      if (fromGallery) {
+        closeImageGallery();
+        // Refresh persisted state so gallery reopen and candidate strip are consistent
+        await loadDrafts();
+      }
     } catch (err) {
       setStatus('Failed: ' + err.message, 'error');
     }
@@ -903,6 +1062,165 @@ _JS = '''(function() {
       btn.textContent = originalText;
     }
   }
+
+  let currentGalleryDraft = null;
+
+  function openImageGallery(itemId) {
+    if (document.getElementById('image-gallery-modal')) return;
+    const draft = currentDrafts.find(d => d.item_id === itemId);
+    if (!draft || !(draft.image_candidates || []).length) return;
+    currentGalleryDraft = draft;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'image-gallery-modal';
+    overlay.onclick = e => { if (e.target === overlay) closeImageGallery(); };
+
+    const panel = document.createElement('div');
+    panel.className = 'modal-panel';
+
+    const header = document.createElement('div');
+    header.className = 'modal-header';
+    const title = document.createElement('div');
+    title.className = 'modal-title';
+    title.textContent = 'Choose an image for this post';
+    const close = document.createElement('button');
+    close.className = 'modal-close';
+    close.innerHTML = '×';
+    close.onclick = closeImageGallery;
+    header.append(title, close);
+
+    const body = document.createElement('div');
+    body.className = 'modal-body';
+    const grid = document.createElement('div');
+    grid.className = 'gallery-grid';
+
+    const active = activeImageUrl(draft);
+    draft.image_candidates.forEach(c => {
+      const card = document.createElement('div');
+      card.className = 'gallery-card' + (stripQuery(c) === stripQuery(active) ? ' active' : '');
+      card.dataset.candidate = c;
+      const img = document.createElement('img');
+      img.src = c;
+      img.alt = '';
+      const meta = document.createElement('div');
+      meta.className = 'gallery-meta';
+      const source = document.createElement('span');
+      source.className = 'gallery-source';
+      source.textContent = candidateSourceLabel(c);
+      const actions = document.createElement('div');
+      actions.className = 'gallery-actions';
+      const previewBtn = document.createElement('button');
+      previewBtn.className = 'btn';
+      previewBtn.textContent = 'Preview';
+      previewBtn.onclick = e => { e.stopPropagation(); previewImage(c); };
+      const selectBtn = document.createElement('button');
+      selectBtn.className = 'btn save';
+      selectBtn.textContent = stripQuery(c) === stripQuery(active) ? 'Selected' : 'Select for post';
+      if (stripQuery(c) === stripQuery(active)) selectBtn.disabled = true;
+      selectBtn.onclick = e => { e.stopPropagation(); selectImage(draft.item_id, c, true); };
+      actions.append(previewBtn, selectBtn);
+      meta.append(source, actions);
+      card.append(img, meta);
+      card.onclick = () => previewImage(c);
+      grid.appendChild(card);
+    });
+    body.appendChild(grid);
+    panel.append(header, body);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeImageGallery() {
+    const modal = document.getElementById('image-gallery-modal');
+    if (modal) {
+      modal.remove();
+      document.body.style.overflow = '';
+    }
+    currentGalleryDraft = null;
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      const preview = document.getElementById('image-preview-overlay');
+      if (preview) { preview.remove(); return; }
+      closeImageGallery();
+    }
+  });
+
+  function previewImage(url) {
+    if (document.getElementById('image-preview-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'image-preview-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '1100';
+    overlay.onclick = () => overlay.remove();
+    const wrapper = document.createElement('div');
+    wrapper.style.position = 'relative';
+    wrapper.style.maxWidth = '90vw';
+    wrapper.style.maxHeight = '90vh';
+    const img = document.createElement('img');
+    img.src = url;
+    img.style.maxWidth = '90vw';
+    img.style.maxHeight = '90vh';
+    img.style.borderRadius = '12px';
+    img.style.boxShadow = '0 20px 60px rgba(0,0,0,0.6)';
+    img.style.display = 'block';
+    const hint = document.createElement('div');
+    hint.textContent = 'Click anywhere or press Esc to close';
+    hint.style.position = 'absolute';
+    hint.style.bottom = '12px';
+    hint.style.left = '50%';
+    hint.style.transform = 'translateX(-50%)';
+    hint.style.color = '#fff';
+    hint.style.fontSize = '12px';
+    hint.style.opacity = '0.7';
+    hint.style.pointerEvents = 'none';
+    wrapper.appendChild(img);
+    wrapper.appendChild(hint);
+    overlay.appendChild(wrapper);
+    document.body.appendChild(overlay);
+    const closeOnEsc = e => {
+      if (e.key === 'Escape') {
+        overlay.remove();
+        document.removeEventListener('keydown', closeOnEsc);
+      }
+    };
+    document.addEventListener('keydown', closeOnEsc);
+  }
+
+  function updateActiveImage(draftId, candidateUrl) {
+    const card = document.querySelector(`article[data-item-id="${draftId}"]`);
+    if (!card) return;
+    const imgBox = card.querySelector('.ln-image img');
+    if (imgBox) imgBox.src = candidateUrl + '?t=' + Date.now();
+    // Mark correct thumb active
+    card.querySelectorAll('.candidate-thumb').forEach((thumb, idx) => {
+      const img = thumb.querySelector('img');
+      if (img && img.src.replace(/\\?t=.*$/, '') === candidateUrl.replace(/\\?t=.*$/, '')) {
+        thumb.classList.add('active');
+      } else {
+        thumb.classList.remove('active');
+      }
+    });
+    // Update gallery if open
+    const modal = document.getElementById('image-gallery-modal');
+    if (modal) {
+      modal.querySelectorAll('.gallery-card').forEach(card => {
+        const selectBtn = card.querySelector('.btn.save');
+        if (card.dataset.candidate === candidateUrl) {
+          card.classList.add('active');
+          if (selectBtn) { selectBtn.textContent = 'Selected'; selectBtn.disabled = true; }
+        } else {
+          card.classList.remove('active');
+          if (selectBtn) { selectBtn.textContent = 'Select for post'; selectBtn.disabled = false; }
+        }
+      });
+    }
+  }
+
+  let currentDrafts = [];
 
   window.switchTab = switchTab;
   window.approve = approve;

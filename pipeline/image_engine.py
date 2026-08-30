@@ -1,10 +1,9 @@
 """Image generation for LinkedIn posts.
 
-Economic provider chain:
-1. Source article OpenGraph image (free, fast, relevant)
-2. Provider-generated image (free Pollinations.ai by default; optional Fal AI)
-3. Pexels free stock photo search (optional API key)
-4. Text-only post if all image sources fail
+Candidate policy:
+- Up to 2 non-AI candidates: article OpenGraph/Twitter/body images, plus Unsplash fallback.
+- Up to 2 AI-generated candidates from different angles (environment, message, focus, POV).
+- Dashboard lets the operator preview all 4 and select the active image for posting.
 """
 import html
 import logging
@@ -37,6 +36,12 @@ IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 IMAGE_CANDIDATES_DIR = DATA_DIR / "image_candidates"
 IMAGE_CANDIDATES_DIR.mkdir(parents=True, exist_ok=True)
 
+# Candidate policy: 2 non-AI (OG/stock) + 2 AI generated from different angles
+NON_AI_CANDIDATES = 2
+AI_CANDIDATES = 2
+MIN_USABLE_WIDTH = 400
+MIN_USABLE_HEIGHT = 200
+
 # Target LinkedIn feed aspect ratio ~1.91:1
 TARGET_WIDTH = 1200
 TARGET_HEIGHT = 627
@@ -68,7 +73,7 @@ def _absolute_url(base: str, src: str) -> str | None:
     return urllib.parse.urljoin(base, src)
 
 
-def _is_usable_size(path: Path, min_width: int = 400, min_height: int = 200) -> bool:
+def _is_usable_size(path: Path, min_width: int = MIN_USABLE_WIDTH, min_height: int = MIN_USABLE_HEIGHT) -> bool:
     """Check downloaded image has usable dimensions for a LinkedIn feed image."""
     try:
         from PIL import Image
@@ -76,6 +81,7 @@ def _is_usable_size(path: Path, min_width: int = 400, min_height: int = 200) -> 
             return im.width >= min_width and im.height >= min_height
     except (OSError, ImportError, ValueError):
         return False
+
 
 def _is_large_enough(img) -> bool:
     """Reject tiny icons, avatars, and tracking pixels."""
@@ -87,6 +93,35 @@ def _is_large_enough(img) -> bool:
     if w and h:
         return w >= 240 and h >= 120
     return True
+
+
+def _fetch_page(url: str, timeout: int = 15) -> requests.Response:
+    """Fetch a page with a browser-like User-Agent."""
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Encoding": "gzip, deflate",
+        "DNT": "1",
+        "Connection": "keep-alive",
+    }
+    return requests.get(url, timeout=timeout, headers=headers)
+
+
+def _save_response_image(resp: requests.Response, output_path: Path) -> Path | None:
+    """Save image bytes from a response as PNG, converting if needed."""
+    try:
+        img = Image.open(BytesIO(resp.content))
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        img.save(output_path, "PNG")
+        return output_path
+    except (OSError, ValueError):
+        output_path.write_bytes(resp.content)
+        return output_path
 
 
 def _download_image(url: str, output_path: Path) -> Path | None:
@@ -118,13 +153,59 @@ def _download_image(url: str, output_path: Path) -> Path | None:
     return None
 
 
+def _download_unsplash(query: str, output_path: Path, width: int = TARGET_WIDTH, height: int = TARGET_HEIGHT) -> Path | None:
+    """Download a relevant Unsplash image using the source API (free, no key)."""
+    try:
+        encoded = urllib.parse.quote(query)
+        # source.unsplash.com is deprecated but still works in many regions; if it fails we degrade.
+        url = f"https://source.unsplash.com/{width}x{height}/?{encoded}"
+        resp = requests.get(url, timeout=30, allow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        if not resp.content or len(resp.content) < 2000:
+            logger.warning("Unsplash returned empty/too-small response")
+            return None
+        _save_response_image(resp, output_path)
+        if not _is_usable_size(output_path):
+            logger.warning("Unsplash image too small, ignoring %s", output_path)
+            output_path.unlink(missing_ok=True)
+            return None
+        logger.info("Downloaded image from Unsplash: %s", output_path)
+        return output_path
+    except (requests.RequestException, OSError, ValueError):
+        logger.exception("Unsplash download failed for %s", query)
+    return None
+
+
+def _build_unsplash_query(day: str, pillar: str, title: str, linkedin_post: str, hashtags: str) -> str:
+    """Create a concise Unsplash search query from post metadata."""
+    pillar_lower = (pillar or "").lower()
+    title_clean = _clean_for_prompt(title or linkedin_post or "technology")
+    if "security" in pillar_lower:
+        return "cybersecurity technology dark"
+    if "founder" in pillar_lower:
+        return "business strategy office laptop"
+    if "tool" in pillar_lower:
+        return "software technology dashboard"
+    if "builder" in pillar_lower:
+        return "developer coding workspace"
+    if "tomorrow" in pillar_lower:
+        return "futuristic technology horizon"
+    if "viral" in pillar_lower:
+        return "technology innovation abstract"
+    if "pattern" in pillar_lower:
+        return "network technology abstract"
+    if "ai" in title_clean.lower():
+        return "artificial intelligence technology"
+    return "technology abstract"
+
+
 def extract_article_images(url: str, item_id: str, max_candidates: int = 4) -> list[str]:
-    """Download OG + article body image candidates for a URL."""
+    """Download OG + Twitter + article body image candidates for a URL."""
     candidates_dir = IMAGE_CANDIDATES_DIR / item_id
     candidates_dir.mkdir(parents=True, exist_ok=True)
     found: list[str] = []
     try:
-        page_resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        page_resp = _fetch_page(url, timeout=15)
         page_resp.raise_for_status()
         html_text = page_resp.text
         from bs4 import BeautifulSoup
@@ -137,7 +218,7 @@ def extract_article_images(url: str, item_id: str, max_candidates: int = 4) -> l
             abs_url = _absolute_url(url, img_url)
             if abs_url:
                 path = _download_image(abs_url, candidates_dir / "og.jpg")
-                if path:
+                if path and _is_usable_size(path) and str(path) not in found:
                     found.append(str(path))
 
         if len(found) < max_candidates:
@@ -147,18 +228,20 @@ def extract_article_images(url: str, item_id: str, max_candidates: int = 4) -> l
                 abs_url = _absolute_url(url, img_url)
                 if abs_url:
                     path = _download_image(abs_url, candidates_dir / "twitter.jpg")
-                    if path and str(path) not in found:
+                    if path and _is_usable_size(path) and str(path) not in found:
                         found.append(str(path))
 
         if len(found) < max_candidates:
-            for tag in soup.select("article img, main img, .post-content img, .entry-content img"):
+            for tag in soup.select("article img, main img, .post-content img, .entry-content img, figure img, section img"):
                 if len(found) >= max_candidates:
                     break
-                src = tag.get("src") or tag.get("data-src") or tag.get("data-lazy-src")
-                abs_url = _absolute_url(url, src)
+                src_attr = tag.get("src") or tag.get("data-src") or tag.get("data-lazy-src")
+                abs_url = _absolute_url(url, src_attr)
                 if not abs_url:
                     continue
                 if not _is_large_enough(tag):
+                    continue
+                if abs_url.startswith("data:") or abs_url.endswith(".svg"):
                     continue
                 suffix = Path(abs_url).suffix or ".jpg"
                 suffix = suffix.split("?")[0] or ".jpg"
@@ -168,47 +251,96 @@ def extract_article_images(url: str, item_id: str, max_candidates: int = 4) -> l
                 path = _download_image(abs_url, candidates_dir / name)
                 if path and str(path) not in found and _is_usable_size(path):
                     found.append(str(path))
+    except requests.HTTPError as exc:
+        logger.warning("Article image extraction HTTP error for %s: %s", url, exc)
     except (requests.RequestException, OSError):
         logger.exception("Article image extraction failed for %s", url)
     return found
 
 
-def prompt_for_post(day: str, pillar: str, title: str, linkedin_post: str, hashtags: str) -> str:
-    """Build a LinkedIn-optimized image prompt from post metadata."""
+def prompt_for_post(
+    day: str,
+    pillar: str,
+    title: str,
+    linkedin_post: str,
+    hashtags: str,
+    angle: str = "",
+) -> str:
+    """Build a LinkedIn-optimized image prompt from post metadata.
+
+    The optional `angle` lets us generate multiple AI variants from different
+    perspectives / environments / messages / POVs while keeping the same core
+    subject.
+    """
     base = _clean_for_prompt(title or linkedin_post)
-    day_lower = day.lower()
-    pillar_lower = pillar.lower()
+    summary = _clean_for_prompt(linkedin_post)
+    entities = re.findall(
+        r"\b(AWS|Google|OpenAI|Anthropic|Meta|Microsoft|NVIDIA|Cloudflare|Amazon|DeepMind|Gemini|Nvidia|ChatGPT|Claude|Llama|Python|Kubernetes|Docker|React|TypeScript|Cursor|Windsurf|Ollama|Hugging Face)\b",
+        base + " " + summary,
+    )
+    entity_clause = ""
+    if entities:
+        entity_clause = f" Inspired by the visual language of {entities[0]}, but no logos, trademarks, or text."
+
+    subject = base
+    if summary and summary != base:
+        # Use first sentence only to keep the prompt tight and the visual focused.
+        first_sentence = re.split(r"(?<=[.!?])\s+", summary.strip())[0]
+        subject = f"{base}: {first_sentence[:140]}"
+
+    angle = (angle or "").strip().lower()
+    if angle == "environment":
+        angle_clause = (
+            "Wide establishing shot of the environment where this technology is used, "
+            "modern workspace or data center ambience, soft ambient light, cinematic depth."
+        )
+    elif angle == "message":
+        angle_clause = (
+            "Tight conceptual illustration of the core message or transformation, "
+            "one bold symbolic object in the center, clean negative space, editorial graphic style."
+        )
+    elif angle == "focus":
+        angle_clause = (
+            "Macro hero detail: a single screen element, chip, lock, or UI component in razor focus, "
+            "bokeh background, product photography lighting."
+        )
+    elif angle == "pov":
+        angle_clause = (
+            "First-person point-of-view shot of someone interacting with this technology, "
+            "hands on keyboard or holding device, over-the-shoulder angle, immersive and human."
+        )
+    else:
+        angle_clause = "Professional editorial hero shot, centered composition, clean background."
+
+    day_lower = (day or "").lower()
+    pillar_lower = (pillar or "").lower()
 
     style_fragments = []
     if "tool" in pillar_lower or "monday" in day_lower:
-        style_fragments.append("clean abstract SaaS product hero card, dark mode, single icon, minimal, 1.91:1 landscape")
+        style_fragments.append("clean abstract SaaS product hero card, dark mode, blue accent, minimal, 1.91:1 landscape")
     elif "viral" in pillar_lower or "tuesday" in day_lower:
-        style_fragments.append("bold news-style editorial header, one strong visual metaphor, dynamic diagonal composition, glowing neural shapes, 1.91:1 landscape")
+        style_fragments.append("bold news-style editorial header, strong visual metaphor, dynamic diagonal composition, controlled neural shapes, 1.91:1 landscape")
     elif "pattern" in pillar_lower or "wednesday" in day_lower:
         style_fragments.append("two connected panels with flowing data lines, inputs-to-output infographic, blue-purple gradient, 1.91:1 landscape")
     elif "builder" in pillar_lower or "thursday" in day_lower:
-        style_fragments.append("cozy developer workspace, focused UI element with blurred screen glow, coffee cup, warm desk lighting, 1.91:1 landscape")
+        style_fragments.append("cozy developer workspace, focused UI element with blurred screen glow, warm desk lighting, 1.91:1 landscape")
     elif "security" in pillar_lower or "friday" in day_lower:
-        style_fragments.append("dark cybersecurity editorial header, abstract lock-shield geometry, red-team amber glow, 1.91:1 landscape")
+        style_fragments.append("dark cybersecurity editorial header, abstract lock-shield geometry, amber-red glow on deep blue, 1.91:1 landscape")
     elif "founder" in pillar_lower or "saturday" in day_lower:
-        style_fragments.append("strategic founder office scene, market-timing chart or whiteboard, soft natural light, back-or-side view, 1.91:1 landscape")
+        style_fragments.append("strategic founder office scene, market chart or whiteboard, soft natural light, back-or-side view, 1.91:1 landscape")
     elif "tomorrow" in pillar_lower or "sunday" in day_lower:
-        style_fragments.append("wide futuristic horizon, dawn cityscape silhouette, glowing data streams in sky, one central symbol, 1.91:1 landscape")
+        style_fragments.append("wide futuristic horizon, dawn cityscape silhouette, glowing data streams, one central symbol, 1.91:1 landscape")
     else:
         style_fragments.append("modern tech editorial illustration, clean composition, professional LinkedIn cover style, 1.91:1 landscape")
 
     style = ", ".join(style_fragments)
 
-    entities = re.findall(r"\b(AWS|Google|OpenAI|Anthropic|Meta|Microsoft|NVIDIA|Pinterest|Cloudflare|Amazon|DeepMind|Gemini|Nvidia)\b", base)
-    entity_clause = ""
-    if entities:
-        entity_clause = f" Inspired by {entities[0]} aesthetic but no logos, trademarks, or text."
-
     prompt = (
-        f"Professional LinkedIn post header image about {base}. "
-        f"{style}.{entity_clause} "
-        "Completely free of text, letters, numbers, logos, watermarks, trademarks, UI chrome, and readable labels. "
-        "High quality, centered composition, safe for business audience."
+        f"Professional editorial LinkedIn header image about {subject}. "
+        f"{angle_clause} {style}.{entity_clause} "
+        "No text, letters, numbers, logos, watermarks, trademarks, UI chrome, or readable labels. "
+        "Cinematic lighting, sharp focus, photorealistic 3D render, high detail, clean centered composition, "
+        "visually striking, safe for a professional business and developer audience."
     )
     return prompt
 
@@ -216,7 +348,7 @@ def prompt_for_post(day: str, pillar: str, title: str, linkedin_post: str, hasht
 def _fetch_og_image(url: str, output_path: Path) -> Path | None:
     """Try to download the source article's OpenGraph image."""
     try:
-        page_resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        page_resp = _fetch_page(url, timeout=15)
         page_resp.raise_for_status()
         html_text = page_resp.text
         m = re.search(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', html_text, re.IGNORECASE)
@@ -241,19 +373,6 @@ def _fetch_og_image(url: str, output_path: Path) -> Path | None:
     return None
 
 
-def _save_response_image(resp: requests.Response, output_path: Path) -> Path | None:
-    """Save image bytes from a response as PNG, converting if needed."""
-    try:
-        img = Image.open(BytesIO(resp.content))
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
-        img.save(output_path, "PNG")
-        return output_path
-    except (OSError, ValueError):
-        output_path.write_bytes(resp.content)
-        return output_path
-
-
 def _generate_with_pollinations(prompt: str, output_path: Path, width: int = TARGET_WIDTH, height: int = TARGET_HEIGHT) -> Path | None:
     """Generate an image via Pollinations.ai (free, no API key)."""
     encoded = urllib.parse.quote(prompt)
@@ -261,7 +380,7 @@ def _generate_with_pollinations(prompt: str, output_path: Path, width: int = TAR
         f"https://image.pollinations.ai/prompt/{encoded}"
         f"?width={width}&height={height}"
         f"&nologo=true"
-        f"&negative_prompt=text,words,letters,numbers,logo,watermark,trademark,UI,labels,signature"
+        f"&negative_prompt=text,words,letters,numbers,logo,watermark,trademark,UI,labels,signature,lowres,blurry,ugly,deformed,oversaturated"
     )
     try:
         resp = requests.get(url, timeout=120)
@@ -367,6 +486,84 @@ def _extract_pexels_query(day: str, pillar: str, title: str) -> str:
     return "technology abstract"
 
 
+def candidates_for_post(
+    item_url: str,
+    title: str,
+    day: str,
+    pillar: str,
+    linkedin_post: str,
+    hashtags: str,
+    item_id: str | None = None,
+    provider: str | None = None,
+) -> tuple[Path | None, list[str], str]:
+    """Generate a full candidate set for a post.
+
+    Returns:
+        (active_image_path, candidate_paths, source_label)
+
+    Policy:
+      - Up to 2 non-AI candidates: OG/Twitter/article images first, then Unsplash fallback.
+      - Up to 2 AI-generated candidates from different angles: environment, message, focus, pov.
+      - The active image is the first usable non-AI candidate if available, otherwise the first
+        successful AI-generated candidate.
+    """
+    if not item_url:
+        return None, [], "none"
+
+    chosen_provider = provider or IMAGE_PROVIDER
+    candidates_dir = IMAGE_CANDIDATES_DIR / (item_id or _slug(title) or "draft")
+    candidates_dir.mkdir(parents=True, exist_ok=True)
+
+    non_ai: list[Path] = []
+    ai: list[Path] = []
+
+    # 1. Non-AI: article/OG images
+    article_cands = extract_article_images(item_url, item_id or _slug(title), max_candidates=NON_AI_CANDIDATES)
+    for p in article_cands:
+        path = Path(p)
+        if path.exists() and _is_usable_size(path) and path not in non_ai:
+            non_ai.append(path)
+        if len(non_ai) >= NON_AI_CANDIDATES:
+            break
+
+    # 2. Non-AI fallback: Pexels curated search (API key optional) then Unsplash
+    if len(non_ai) < NON_AI_CANDIDATES:
+        stock_query = _extract_pexels_query(day, pillar, title)
+        for i in range(NON_AI_CANDIDATES - len(non_ai)):
+            out = candidates_dir / f"pexels_{i}.jpg"
+            result = _search_pexels(stock_query + (f" {i}" if i else ""), out)
+            if result and _is_usable_size(result) and result not in non_ai:
+                non_ai.append(result)
+                continue
+            # Fallback to Unsplash if Pexels is not configured or returned nothing usable
+            unsplash_query = _build_unsplash_query(day, pillar, title, linkedin_post, hashtags)
+            out2 = candidates_dir / f"unsplash_{i}.jpg"
+            result2 = _download_unsplash(unsplash_query, out2)
+            if result2 and result2 not in non_ai:
+                non_ai.append(result2)
+            if len(non_ai) >= NON_AI_CANDIDATES:
+                break
+
+    # 3. AI candidates: generate from 4 different angles, keep first 2 successes
+    angles = ["environment", "message", "focus", "pov"]
+    h = _slug(title) or _slug(item_url)
+    for idx, angle in enumerate(angles):
+        if len(ai) >= AI_CANDIDATES:
+            break
+        prompt = prompt_for_post(day, pillar, title, linkedin_post, hashtags, angle=angle)
+        logger.info("AI image prompt (%s): %s", angle, prompt)
+        out = IMAGE_DIR / f"{h}_{angle}_{chosen_provider}.png"
+        result = _generate_image(prompt, out, chosen_provider)
+        if result and _is_usable_size(result) and result not in ai:
+            ai.append(result)
+
+    # Combine candidates with active selection
+    all_candidates = [str(p) for p in non_ai + ai]
+    active = non_ai[0] if non_ai else (ai[0] if ai else None)
+    source = "article" if non_ai else (chosen_provider if ai else "none")
+    return active, all_candidates, source
+
+
 def image_for_post(
     item_url: str,
     title: str,
@@ -381,43 +578,47 @@ def image_for_post(
     item_id: str | None = None,
     force: bool = False,
 ) -> tuple[Path | None, str]:
-    """Return a local image path for the post, using the cheapest available source."""
+    """Return a local image path for the post, using the cheapest available source.
+
+    This is the legacy single-image entry point. It now delegates to the richer
+    candidates_for_post logic and returns the active candidate + source label.
+    """
     if not item_url:
-        return None
+        return None, "none"
 
     chosen_provider = provider or IMAGE_PROVIDER
     h = _slug(title) or _slug(item_url)
-    output_path = IMAGE_DIR / f"{h}.png"
-    if output_path.exists() and not skip_og and not force:
-        # If cached image is too small, ignore it and regenerate
-        if _is_usable_size(output_path):
-            return output_path, "cache"
-        logger.warning("Cached image too small, ignoring: %s", output_path)
+    cache_path = IMAGE_DIR / f"{h}.png"
 
-    # 1. Try OG image
-    if not skip_og:
-        og_path = output_path.with_suffix(".og.jpg")
-        og = _fetch_og_image(item_url, og_path)
-        if og and _is_usable_size(og):
-            return og, "og"
+    # Fast-path cache unless forced or skipping OG
+    if cache_path.exists() and not skip_og and not force:
+        if _is_usable_size(cache_path):
+            return cache_path, "cache"
+        logger.warning("Cached image too small, ignoring: %s", cache_path)
 
-    # 2. Try configured provider generation
-    prompt = prompt_for_post(day, pillar, title, linkedin_post, hashtags)
-    logger.info("Image prompt: %s", prompt)
-    gen_path = output_path.with_suffix(f".{chosen_provider}.png")
-    result = _generate_image(prompt, gen_path, chosen_provider, width=width, height=height)
-    if result:
-        return result, chosen_provider
+    active, candidates, source = candidates_for_post(
+        item_url=item_url,
+        title=title,
+        day=day,
+        pillar=pillar,
+        linkedin_post=linkedin_post,
+        hashtags=hashtags,
+        item_id=item_id,
+        provider=provider,
+    )
 
-    # 3. Try Pexels stock photo (if API key configured)
-    pexels_query = _extract_pexels_query(day, pillar, title)
-    pexels_path = output_path.with_suffix(".pexels.jpg")
-    result = _search_pexels(pexels_query, pexels_path)
-    if result:
-        return result
+    # If OG should be skipped, prefer the first AI candidate
+    if skip_og and candidates:
+        for c in candidates:
+            cand_path = Path(c)
+            if (chosen_provider in cand_path.name or any(a in cand_path.name for a in ("environment", "message", "focus", "pov"))) and _is_usable_size(cand_path):
+                active = cand_path
+                source = chosen_provider
+                break
 
-    logger.warning("All image sources failed for %s", title)
-    return None
+    if active:
+        return active, source
+    return None, "none"
 
 
 def available_providers() -> list[str]:

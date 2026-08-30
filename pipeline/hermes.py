@@ -33,7 +33,7 @@ from pipeline.content_analyst import run_analysis
 from pipeline.dedupe import find_duplicate
 from pipeline.drafting import Draft, compile_newsletter, draft_item, load_drafts, save_draft
 from pipeline.drafting_v2 import draft_item_v2
-from pipeline.image_engine import extract_article_images, image_for_post
+from pipeline.image_engine import candidates_for_post
 from pipeline.invariants import run_health_checks
 from pipeline.log import setup_logging
 from pipeline.publishers.composio import (
@@ -551,7 +551,6 @@ def cmd_draft_today(args) -> int:
     target_date = _date.fromisoformat(date_override) if date_override else None
     plan = day_plan(target_date)
     dry_run = getattr(args, "dry_run", False)
-    force_generate = getattr(args, "force_generate", False)
     image_provider = getattr(args, "image_provider", None)
 
     candidates = list_items(status="worthy", limit=args.limit * 5)
@@ -570,39 +569,31 @@ def cmd_draft_today(args) -> int:
     queued = 0
     skip_image = getattr(args, "skip_image", False)
     for item, score in selected:
-        # Pre-fetch article/source image candidates so the draft can list them
-        candidates = extract_article_images(item.item_url, item.id, max_candidates=4)
-        if candidates:
-            item.image_candidates = candidates
-            try:
-                save_item(item)
-            except (OSError, RuntimeError):
-                logger.exception("Failed to persist item image_candidates")
-
         draft = draft_item_v2(item, score, day_plan=plan)
 
         if not skip_image:
-            img_path, img_source = image_for_post(
+            # Build a full candidate set: 2 non-AI + 2 AI from different angles.
+            active_path, candidate_paths, img_source = candidates_for_post(
                 item_url=item.item_url,
                 title=draft.title,
                 day=plan.day_name,
                 pillar=plan.post_type,
                 linkedin_post=draft.linkedin_post,
                 hashtags=" ".join(draft.hashtags),
-                skip_og=force_generate,
-                provider=image_provider,
                 item_id=item.id,
+                provider=image_provider,
             )
-            if img_path:
-                draft.image_path = str(img_path)
+            if active_path:
+                draft.image_path = str(active_path)
                 draft.image_source = img_source
-                # Persist image path on the source item so future drafts can reuse it
-                item.image_path = str(img_path)
+                draft.image_candidates = candidate_paths
+                item.image_path = str(active_path)
                 item.image_source = img_source
+                item.image_candidates = candidate_paths
                 try:
                     save_item(item)
                 except (OSError, RuntimeError):
-                    logger.exception("Failed to persist item image_path")
+                    logger.exception("Failed to persist item image data")
             else:
                 logger.warning("No image produced for draft %s; review will show placeholder", draft.title)
 

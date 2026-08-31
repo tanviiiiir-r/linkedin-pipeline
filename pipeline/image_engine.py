@@ -93,26 +93,22 @@ def _extract_visual_keywords(title: str, linkedin_post: str, hashtags: str, sour
     # Keep up to 5
     keywords = ", ".join(topics[:5])
 
-    # Domain hint
+    # Domain hint (only for non-generic hosts; appended so it does not dominate topic)
     domain = ""
     if source_url:
         try:
             from urllib.parse import urlparse
-            domain = urlparse(source_url).netloc.replace("www.", "").split(".")[0]
+            host = urlparse(source_url).netloc.replace("www.", "").split(".")[0]
+            generic_hosts = {"reddit", "youtube", "arxiv", "medium", "substack", "github"}
+            if host and host not in generic_hosts and host not in topics:
+                domain = host
         except Exception:
             pass
-    if domain and domain not in {t for t in topics}:
-        keywords = f"{domain}, {keywords}"
+    if domain:
+        keywords = f"{keywords}, {domain}"
 
-    # Build a concrete subject line: title + first sentence of post if different
-    subject = clean_title
-    first_sentence = ""
-    if clean_post and clean_post != clean_title:
-        m = re.split(r"(?<=[.!?])\s+", clean_post.strip())
-        if m:
-            first_sentence = m[0][:160]
-    if first_sentence and first_sentence.lower() not in clean_title.lower():
-        subject = f"{clean_title}: {first_sentence}"
+    # Build a concise subject line for the image prompt
+    subject = clean_title[:120]
     return subject, keywords
 
 
@@ -337,71 +333,85 @@ def extract_article_images(url: str, item_id: str, max_candidates: int = 4) -> l
 
 
 
-def _pick_symbol(keywords: str) -> str:
-    """Pick a concrete symbolic object from the keyword list."""
-    k = keywords.lower()
-    symbols = [
-        ("security", "a polished shield-lock icon"),
-        ("red team", "a magnifying glass over code"),
-        ("vulnerability", "a cracked lock on a circuit board"),
-        ("agent", "a network of connected agent nodes"),
-        ("multi-agent", "orbiting agent nodes passing messages"),
-        ("llm", "a glowing language model chip"),
-        ("model", "a sleek neural model cube"),
-        ("tokenizer", "a stream of glowing tokens"),
-        ("code", "elegant code on a screen"),
-        ("deploy", "a rocket launching from a laptop"),
-        ("benchmark", "a rising performance chart"),
+def _visual_anchor(subject: str, keywords: str, linkedin_post: str) -> str:
+    """Pick a concrete visual anchor tied to the post's actual topic.
+
+    Prefer a specific object/scene implied by the title and post text rather
+    than a generic icon, so generated images are recognizably relevant.
+    """
+    text = f"{subject} {keywords} {linkedin_post}".lower()
+
+    # Topic-specific concrete anchors (check longer phrases first)
+    anchors = [
+        ("decompiler", "decompiled code floating above a circuit board"),
+        ("binary", "binary code matrix dissolving into readable source"),
+        ("knowledge graph", "a glowing network graph on a dark screen"),
+        ("threat intelligence", "a threat-map dashboard with subtle red nodes"),
+        ("tokenizer", "a stream of glowing tokens flowing into a neural core"),
+        ("token", "a luminous token stream"),
+        ("red team", "a red-team operator console with holographic targets"),
+        ("vulnerability", "a hardened lock protecting glowing data pathways"),
+        ("malware", "isolated malicious code contained inside a glass shield"),
+        ("agent", "a constellation of connected AI agent nodes"),
+        ("multi-agent", "orbiting agent nodes exchanging glowing messages"),
+        ("langgraph", "a branching graph of agent decision nodes"),
+        ("orchestration", "a conductor's holographic workflow diagram"),
+        ("gpu", "a sleek GPU with luminous data traces"),
+        ("inference", "a server rack with pulsing inference pipelines"),
+        ("benchmark", "a rising performance chart projected in 3D space"),
+        ("reasoning", "a luminous chain-of-thought diagram"),
+        ("embedding", "a spiral of semantic vectors"),
         ("memory", "a crystalline memory module"),
         ("attention", "a luminous attention grid"),
-        ("transformer", "a transformer architecture block"),
-        ("reasoning", "a glowing chain of thought diagram"),
-        ("infrastructure", "a clean server rack"),
-        ("gpu", "a powerful GPU card"),
-        ("cloud", "a minimalist cloud node"),
-        ("founder", "a focused founder at a whiteboard"),
-        ("startup", "a small team around a laptop"),
-        ("strategy", "a chess piece on a strategy map"),
-        ("future", "a clean horizon line"),
-        ("paper", "an open research paper"),
+        ("transformer", "a transformer architecture block glowing softly"),
+        ("fine-tun", "a model being sculpted by precise light beams"),
+        ("dataset", "a crystalline data archive"),
+        ("founder", "a founder sketching strategy on a whiteboard"),
+        ("strategy", "a strategic map with one central chess piece"),
+        ("future", "a clean dawn horizon with a single glowing symbol"),
     ]
-    for term, symbol in symbols:
-        if term in k:
-            return symbol
+    for term, anchor in anchors:
+        if term in text:
+            return anchor
+
+    # Fallback: derive a noun phrase from the first unique keywords
+    words = [w.strip() for w in keywords.split(",") if w.strip()]
+    if words:
+        return f"a polished visualization of {words[0]}"
     return "a clean geometric symbol"
 
 
-def _build_visual_scene(angle: str, subject: str, keywords: str, pillar: str, source_url: str) -> str:
+def _build_visual_scene(angle: str, subject: str, keywords: str, pillar: str, source_url: str, linkedin_post: str = "") -> str:
     """Build a concrete, topic-aware scene description for an image angle."""
     angle = (angle or "").strip().lower()
-    symbol = _pick_symbol(keywords)
+    anchor = _visual_anchor(subject, keywords, linkedin_post)
     topic_word = keywords.split(",")[0].strip() if keywords else "technology"
 
     if angle == "environment":
         return (
-            f"Wide establishing shot of a real-world setting for {topic_word}: "
-            f"a calm modern developer workspace, a clean server room with subtle accent lighting, "
-            f"or a minimalist lab. {symbol} sits naturally in the scene. "
-            "Soft natural light, shallow depth of field, no cartoon illustration."
+            f"Wide establishing shot of a real-world setting for {subject}: "
+            "a calm modern developer workspace, a clean server room with subtle accent lighting, "
+            f"or a minimalist lab. {anchor.capitalize()} sits naturally in the scene as a physical prop. "
+            "Soft natural light, shallow depth of field, photorealistic, no cartoon illustration, no text."
         )
     if angle == "message":
         return (
-            f"Conceptual editorial illustration of the core message about {subject}. "
-            f"Center one strong symbolic scene: {symbol} on clean negative space, "
-            "magazine-cover graphic style, minimal clutter."
+            f"Conceptual editorial still-life that communicates the core message of {subject}. "
+            f"Center one strong symbolic object: {anchor} on generous negative space, "
+            "magazine-cover photographic style, minimal clutter, photorealistic textures, no text."
         )
     if angle == "focus":
         return (
-            f"Macro product-photography detail: {symbol} in razor-sharp focus, "
-            "creamy bokeh background, professional studio lighting, no people."
+            f"Macro product-photography detail: {anchor} in razor-sharp focus, "
+            "creamy bokeh background, professional studio lighting, no people, no text."
         )
     if angle == "pov":
         return (
-            f"First-person point-of-view: over-the-shoulder of a builder working with {topic_word}, "
-            "hands on a keyboard or device, immersive and human, shallow depth of field, "
-            "professional business context."
+            f"First-person point-of-view: over-the-shoulder of a builder working on {topic_word}, "
+            f"with {anchor} visible on the screen or desk. Immersive and human, shallow depth of field, "
+            "professional business context, photorealistic, no text."
         )
-    return f"Professional editorial hero shot of {subject}, centered composition, clean background."
+    return f"Professional editorial hero shot of {subject}, centered composition, clean background, photorealistic, no text."
 
 
 def _build_style(pillar: str, keywords: str, stock_style: bool) -> str:
@@ -412,7 +422,8 @@ def _build_style(pillar: str, keywords: str, stock_style: bool) -> str:
     if stock_style:
         parts.append(
             "authentic photorealistic stock photograph, clean professional business look, "
-            "subtle depth of field, natural color grading, no stylized illustration, 1.91:1 landscape"
+            "subtle depth of field, natural color grading, no stylized illustration, no text or labels, "
+            "1.91:1 landscape"
         )
         return ", ".join(parts)
 
@@ -424,32 +435,32 @@ def _build_style(pillar: str, keywords: str, stock_style: bool) -> str:
         )
     elif "agent" in k or "multi-agent" in k or "orchestration" in k:
         parts.append(
-            "clean network diagram aesthetic, connected nodes, soft blue-purple glow, "
-            "minimal background, technical illustration"
+            "photorealistic 3D render of connected nodes, soft blue-purple glow, "
+            "minimal dark background, technical editorial, sharp detail, no text"
         )
     elif "llm" in k or "model" in k or "transformer" in k or "attention" in k:
         parts.append(
-            "sleek AI model visualization, layered neural geometry, soft cyan and violet light, "
-            "futuristic but clean"
+            "photorealistic 3D render of layered neural geometry, soft cyan and violet light, "
+            "futuristic but clean, high detail, no text"
         )
     elif "code" in k or "developer" in k or "builder" in k or "deploy" in k:
         parts.append(
-            "real developer workspace, focused screen glow, warm practical lighting, "
-            "authentic textures"
+            "photorealistic developer workspace, focused screen glow, warm practical lighting, "
+            "authentic textures, no readable text or UI labels"
         )
     elif "founder" in k or "startup" in k or "strategy" in k:
         parts.append(
-            "strategic office scene, whiteboard or market chart, soft natural window light, "
-            "back-or-side view silhouette"
+            "photorealistic strategic office scene, whiteboard or market chart, soft natural window light, "
+            "back-or-side view silhouette, no readable text or labels"
         )
     elif "future" in k or "prediction" in k or "horizon" in k:
         parts.append(
-            "wide futuristic horizon, dawn cityscape silhouette, glowing data streams, "
-            "one central symbol, cinematic optimistic mood"
+            "photorealistic wide futuristic horizon, dawn cityscape silhouette, glowing data streams, "
+            "one central symbol, cinematic optimistic mood, no text"
         )
     else:
         parts.append(
-            "modern tech editorial illustration, clean composition, professional LinkedIn cover style"
+            "photorealistic modern tech editorial, clean composition, professional LinkedIn cover style, no text"
         )
 
     parts.append("1.91:1 landscape, high detail, sharp focus, cinematic lighting")
@@ -473,7 +484,7 @@ def prompt_for_post(
     non-AI fallback slots.
     """
     subject, keywords = _extract_visual_keywords(title, linkedin_post, hashtags, source_url)
-    scene = _build_visual_scene(angle, subject, keywords, pillar, source_url)
+    scene = _build_visual_scene(angle, subject, keywords, pillar, source_url, linkedin_post)
     style = _build_style(pillar, keywords, stock_style)
 
     prompt = (
@@ -772,7 +783,7 @@ def candidates_for_post(
         logger.info("AI image prompt (%s): %s", angle, prompt)
         out = candidates_dir / f"ai_{angle}.png"
         seed = base_seed + idx + 100
-        result = _generate_image(prompt, out, chosen_provider, seed=seed, model="flux")
+        result = _generate_image(prompt, out, chosen_provider, seed=seed, model="flux-realism")
         if result and _is_usable_size(result) and result not in ai:
             ai.append(result)
 

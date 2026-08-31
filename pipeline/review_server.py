@@ -151,25 +151,50 @@ def _copy_image_for_review(image_path: str, item_id: str) -> str | None:
     return None
 
 
+def _candidate_source_label(candidate: str) -> str:
+    """Derive a human-readable source label from the original candidate path."""
+    lower = Path(candidate).name.lower()
+    if any(x in lower for x in ("og.jpg", "twitter.jpg", "article_")):
+        return "article"
+    if any(x in lower for x in ("unsplash", "pexels")):
+        return "stock"
+    if "ai_stock" in lower:
+        return "AI stock"
+    if "environment" in lower:
+        return "AI · environment"
+    if "message" in lower:
+        return "AI · message"
+    if "focus" in lower:
+        return "AI · focus"
+    if "pov" in lower:
+        return "AI · POV"
+    if "pollinations" in lower or "fal" in lower:
+        return "AI"
+    return "image"
+
 def _draft_to_json(draft: Draft, analysis: dict | None = None, status: str = "pending") -> dict:
     image_rel = _copy_image_for_review(draft.image_path, draft.item_id)
     candidates_rel: list[str] = []
+    candidate_sources: list[str] = []
     for cand in draft.image_candidates or []:
+        label = _candidate_source_label(cand)
         cand_path = Path(cand)
         if cand_path.is_absolute() and cand_path.exists():
             if not _is_usable_size(cand_path):
                 logger.warning("Skipping unusable candidate image for %s: %s", draft.item_id, cand_path)
                 continue
             ext = _detect_image_extension(cand_path)
-            dest = REVIEW_IMAGES_DIR / f"{draft.item_id}_cand_{len(candidates_rel)}{ext}"
+            dest = REVIEW_IMAGES_DIR / f"{draft.item_id}_cand_{len(candidates_rel)}_{label.replace(' · ', '_').replace(' ', '_')}{ext}"
             REVIEW_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
             try:
                 if _normalize_image(cand_path, dest):
                     candidates_rel.append(str(dest.relative_to(REVIEW_DIR)))
+                    candidate_sources.append(label)
             except OSError:
                 continue
         elif (REVIEW_DIR / cand).exists():
             candidates_rel.append(cand)
+            candidate_sources.append(label)
 
     out = {
         "item_id": draft.item_id,
@@ -181,6 +206,7 @@ def _draft_to_json(draft: Draft, analysis: dict | None = None, status: str = "pe
         "image_url": f"/{image_rel}" if image_rel else None,
         "image_source": draft.image_source,
         "image_candidates": candidates_rel,
+        "image_candidate_sources": candidate_sources,
         "created_at": draft.created_at,
         "approved_at": draft.approved_at,
         "status": status,

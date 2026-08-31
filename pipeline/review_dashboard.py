@@ -76,6 +76,27 @@ def _is_usable_size(path: Path, min_width: int = 400, min_height: int = 200) -> 
         return False
 
 
+def _candidate_source_label(candidate: str) -> str:
+    """Derive a human-readable source label from the original candidate path."""
+    lower = Path(candidate).name.lower()
+    if any(x in lower for x in ("og.jpg", "twitter.jpg", "article_")):
+        return "article"
+    if any(x in lower for x in ("unsplash", "pexels")):
+        return "stock"
+    if "ai_stock" in lower:
+        return "AI stock"
+    if "environment" in lower:
+        return "AI · environment"
+    if "message" in lower:
+        return "AI · message"
+    if "focus" in lower:
+        return "AI · focus"
+    if "pov" in lower:
+        return "AI · POV"
+    if "pollinations" in lower or "fal" in lower:
+        return "AI"
+    return "image"
+
 def _copy_image_for_review(image_path: str, item_id: str) -> str | None:
     if not image_path:
         return None
@@ -127,13 +148,9 @@ def generate_dashboard() -> Path:
             if not _is_usable_size(cand_path):
                 logger.warning("Skipping unusable candidate image for %s: %s", draft.item_id, cand_path)
                 continue
-            try:
-                rel = cand_path.relative_to(REVIEW_DIR)
-                ext = _detect_image_extension(cand_path)
-                dest = REVIEW_IMAGES_DIR / (rel.stem + ext)
-            except ValueError:
-                ext = _detect_image_extension(cand_path)
-                dest = REVIEW_IMAGES_DIR / f"{draft.item_id}_cand_{len(list(REVIEW_IMAGES_DIR.glob(f'{draft.item_id}*')))}{ext}"
+            label = _candidate_source_label(cand)
+            ext = _detect_image_extension(cand_path)
+            dest = REVIEW_IMAGES_DIR / f"{draft.item_id}_cand_{len(list(REVIEW_IMAGES_DIR.glob(f'{draft.item_id}*')))}_{label.replace(' · ', '_').replace(' ', '_')}{ext}"
             try:
                 _normalize_image(cand_path, dest)
             except OSError:
@@ -584,8 +601,9 @@ _JS = '''(function() {
     if (banner) banner.remove();
   }
 
-  function candidateSourceLabel(candidate) {
-    if (!candidate) return 'unknown';
+  function candidateSourceLabel(candidate, sourceList, idx) {
+    if (sourceList && sourceList[idx]) return sourceList[idx];
+    if (!candidate) return 'image';
     const lower = candidate.toLowerCase();
     if (lower.includes('og.jpg') || lower.includes('article_')) return 'article';
     if (lower.includes('unsplash') || lower.includes('pexels')) return 'stock';
@@ -612,11 +630,12 @@ _JS = '''(function() {
     strip.className = 'candidate-strip';
     const active = activeImageUrl(draft);
     const visible = candidates.slice(0, 4);
-    visible.forEach(c => {
+    const sources = draft.image_candidate_sources || [];
+    visible.forEach((c, idx) => {
       const thumb = document.createElement('div');
       const isActive = normalizeUrl(c) === normalizeUrl(active);
       thumb.className = 'candidate-thumb' + (isActive ? ' active' : '');
-      thumb.title = candidateSourceLabel(c);
+      thumb.title = candidateSourceLabel(c, sources, idx);
       thumb.onclick = () => openImageGallery(draft.item_id);
       const img = document.createElement('img');
       img.src = c;
@@ -1107,7 +1126,8 @@ _JS = '''(function() {
     grid.className = 'gallery-grid';
 
     const active = activeImageUrl(draft);
-    draft.image_candidates.forEach(c => {
+    const sources = draft.image_candidate_sources || [];
+    draft.image_candidates.forEach((c, idx) => {
       const card = document.createElement('div');
       const isActive = normalizeUrl(c) === normalizeUrl(active);
       card.className = 'gallery-card' + (isActive ? ' active' : '');
@@ -1119,7 +1139,7 @@ _JS = '''(function() {
       meta.className = 'gallery-meta';
       const source = document.createElement('span');
       source.className = 'gallery-source';
-      source.textContent = candidateSourceLabel(c);
+      source.textContent = candidateSourceLabel(c, sources, idx);
       const actions = document.createElement('div');
       actions.className = 'gallery-actions';
       const previewBtn = document.createElement('button');

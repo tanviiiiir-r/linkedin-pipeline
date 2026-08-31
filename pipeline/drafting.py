@@ -214,15 +214,17 @@ hashtags: {', '.join(draft.hashtags)}
 
 
 def load_drafts(queue_dir: Path) -> list[Draft]:
-    """Load full drafts from queue markdown files."""
+    """Load full drafts from queue markdown files, keeping the newest file per item_id."""
     drafts = []
     if not queue_dir.exists():
         return drafts
+    seen: set[str] = set()
     for path in sorted(queue_dir.glob("*.md"), reverse=True):
         text = path.read_text()
         draft = _parse_draft_markdown(text)
-        if draft:
+        if draft and draft.item_id not in seen:
             drafts.append(draft)
+            seen.add(draft.item_id)
     return drafts
 
 

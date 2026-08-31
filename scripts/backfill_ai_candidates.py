@@ -35,6 +35,14 @@ def _delete_ai_files(candidates_dir: Path) -> None:
             p.unlink(missing_ok=True)
 
 
+def _remove_old_draft_files(item_id: str, queue_dir: Path) -> None:
+    """Remove older markdown draft files for this item before saving the updated one."""
+    if not queue_dir.exists():
+        return
+    for path in queue_dir.glob(f"*--{item_id}--*.md"):
+        logger.info("Removing old draft file: %s", path)
+        path.unlink(missing_ok=True)
+
 def backfill_pending() -> None:
     ensure_dirs()
     pending = list_pending()
@@ -61,6 +69,7 @@ def backfill_pending() -> None:
         draft.image_path = str(active) if active else ""
         draft.image_source = source
         draft.image_candidates = [str(c) for c in candidates]
+        _remove_old_draft_files(item_id, QUEUE_DIR)
         save_draft(draft, QUEUE_DIR)
         logger.info("Updated %s: active=%s source=%s candidates=%s", item_id, draft.image_path, source, len(candidates))
 

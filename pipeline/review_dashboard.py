@@ -521,6 +521,16 @@ _JS = '''(function() {
 
   let currentTab = "pending";
 
+  function stripQuery(url) {
+    if (!url) return '';
+    return url.split('?')[0];
+  }
+  function normalizeUrl(url) {
+    if (!url) return '';
+    let u = url.replace(/^\//, '');
+    return u.split('?')[0];
+  }
+
   async function getApi(path) {
     const r = await fetch('/api' + path);
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -550,7 +560,7 @@ _JS = '''(function() {
   }
 
   function activeImageUrl(draft) {
-    if (draft.image_url) return draft.image_url.replace(/^\\//, '');
+    if (draft.image_url) return normalizeUrl(draft.image_url);
     const m = (draft.image_path || '').match(/(\\.[^.\\/]+)$/);
     const ext = m ? m[1] : '.jpg';
     return 'images/' + draft.item_id + ext;
@@ -578,18 +588,18 @@ _JS = '''(function() {
     if (!candidate) return 'unknown';
     const lower = candidate.toLowerCase();
     if (lower.includes('og.jpg') || lower.includes('article_')) return 'article';
-    if (lower.includes('unsplash')) return 'stock';
+    if (lower.includes('unsplash') || lower.includes('pexels')) return 'stock';
+    if (lower.includes('ai_stock')) return 'AI stock';
     if (lower.includes('environment')) return 'AI · environment';
     if (lower.includes('message')) return 'AI · message';
     if (lower.includes('focus')) return 'AI · focus';
     if (lower.includes('pov')) return 'AI · POV';
-    if (lower.includes('pollinations')) return 'AI';
-    if (lower.includes('fal')) return 'AI';
+    if (lower.includes('pollinations') || lower.includes('fal')) return 'AI';
     return 'image';
   }
 
   function renderCandidates(draft) {
-    const candidates = (draft.image_candidates || []).filter(c => c.startsWith('images/'));
+    const candidates = draft.image_candidates || [];
     if (!candidates.length) return null;
     const wrap = document.createElement('div');
     wrap.className = 'candidate-row';
@@ -601,10 +611,11 @@ _JS = '''(function() {
     const strip = document.createElement('div');
     strip.className = 'candidate-strip';
     const active = activeImageUrl(draft);
-    const visible = candidates.slice(0, 3);
+    const visible = candidates.slice(0, 4);
     visible.forEach(c => {
       const thumb = document.createElement('div');
-      thumb.className = 'candidate-thumb' + (stripQuery(c) === stripQuery(active) ? ' active' : '');
+      const isActive = normalizeUrl(c) === normalizeUrl(active);
+      thumb.className = 'candidate-thumb' + (isActive ? ' active' : '');
       thumb.title = candidateSourceLabel(c);
       thumb.onclick = () => openImageGallery(draft.item_id);
       const img = document.createElement('img');
@@ -614,13 +625,13 @@ _JS = '''(function() {
       thumb.appendChild(img);
       strip.appendChild(thumb);
     });
-    if (candidates.length > 3) {
+    if (candidates.length > 4) {
       const more = document.createElement('div');
       more.className = 'candidate-thumb';
       more.onclick = () => openImageGallery(draft.item_id);
       const overlay = document.createElement('div');
       overlay.className = 'more';
-      overlay.textContent = '+' + (candidates.length - 3);
+      overlay.textContent = '+' + (candidates.length - 4);
       more.appendChild(overlay);
       strip.appendChild(more);
     }
@@ -961,7 +972,7 @@ _JS = '''(function() {
       setStatus('<span class="spinner"></span> Selecting image…', 'running');
       const data = await postApi('/select-image', {item_id: id, candidate});
       if (!data.ok) throw new Error(data.error || 'selection failed');
-      updateActiveImage(id, data.image_url ? data.image_url.replace(/^\\//, '') : candidate);
+      updateActiveImage(id, data.image_url ? normalizeUrl(data.image_url) : normalizeUrl(candidate));
       setStatus('Image selected', 'success');
       setTimeout(clearStatus, 2000);
       if (fromGallery) {
@@ -1098,7 +1109,8 @@ _JS = '''(function() {
     const active = activeImageUrl(draft);
     draft.image_candidates.forEach(c => {
       const card = document.createElement('div');
-      card.className = 'gallery-card' + (stripQuery(c) === stripQuery(active) ? ' active' : '');
+      const isActive = normalizeUrl(c) === normalizeUrl(active);
+      card.className = 'gallery-card' + (isActive ? ' active' : '');
       card.dataset.candidate = c;
       const img = document.createElement('img');
       img.src = c;
@@ -1116,8 +1128,8 @@ _JS = '''(function() {
       previewBtn.onclick = e => { e.stopPropagation(); previewImage(c); };
       const selectBtn = document.createElement('button');
       selectBtn.className = 'btn save';
-      selectBtn.textContent = stripQuery(c) === stripQuery(active) ? 'Selected' : 'Select for post';
-      if (stripQuery(c) === stripQuery(active)) selectBtn.disabled = true;
+      selectBtn.textContent = isActive ? 'Selected' : 'Select for post';
+      if (isActive) selectBtn.disabled = true;
       selectBtn.onclick = e => { e.stopPropagation(); selectImage(draft.item_id, c, true); };
       actions.append(previewBtn, selectBtn);
       meta.append(source, actions);
@@ -1193,12 +1205,14 @@ _JS = '''(function() {
   function updateActiveImage(draftId, candidateUrl) {
     const card = document.querySelector(`article[data-item-id="${draftId}"]`);
     if (!card) return;
+    const normActive = normalizeUrl(candidateUrl);
     const imgBox = card.querySelector('.ln-image img');
     if (imgBox) imgBox.src = candidateUrl + '?t=' + Date.now();
     // Mark correct thumb active
-    card.querySelectorAll('.candidate-thumb').forEach((thumb, idx) => {
+    card.querySelectorAll('.candidate-thumb').forEach((thumb) => {
       const img = thumb.querySelector('img');
-      if (img && img.src.replace(/\\?t=.*$/, '') === candidateUrl.replace(/\\?t=.*$/, '')) {
+      const normThumb = img ? normalizeUrl(img.src) : '';
+      if (normThumb && normThumb === normActive) {
         thumb.classList.add('active');
       } else {
         thumb.classList.remove('active');
@@ -1209,7 +1223,8 @@ _JS = '''(function() {
     if (modal) {
       modal.querySelectorAll('.gallery-card').forEach(card => {
         const selectBtn = card.querySelector('.btn.save');
-        if (card.dataset.candidate === candidateUrl) {
+        const normCard = normalizeUrl(card.dataset.candidate);
+        if (normCard === normActive) {
           card.classList.add('active');
           if (selectBtn) { selectBtn.textContent = 'Selected'; selectBtn.disabled = true; }
         } else {

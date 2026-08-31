@@ -5,7 +5,13 @@ AI-generated candidates (ai_environment, ai_message, ai_focus, ai_pov, ai_stock)
 with freshly generated images from the improved pipeline.
 """
 import logging
+import sys
 from pathlib import Path
+
+# Ensure project root is on PYTHONPATH when run directly
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.settings import DATA_DIR, QUEUE_DIR, ensure_dirs
 from pipeline.approval import list_pending

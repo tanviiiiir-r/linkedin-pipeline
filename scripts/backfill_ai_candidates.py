@@ -61,7 +61,7 @@ def backfill_pending() -> None:
         draft.image_path = str(active) if active else ""
         draft.image_source = source
         draft.image_candidates = [str(c) for c in candidates]
-        save_draft(draft, QUEUE_DIR / "pending")
+        save_draft(draft, QUEUE_DIR)
         logger.info("Updated %s: active=%s source=%s candidates=%s", item_id, draft.image_path, source, len(candidates))
 
 

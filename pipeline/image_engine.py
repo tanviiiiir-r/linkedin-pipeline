@@ -65,6 +65,62 @@ def _clean_for_prompt(text: str, max_len: int = 240) -> str:
 
 
 
+def _extract_subject(title: str) -> str:
+    """Pull the most concrete noun phrase from a title to use as the visual anchor."""
+    if not title:
+        return ""
+    stop_words = {
+        "the", "a", "an", "and", "or", "but", "with", "for", "from", "how", "what", "why",
+        "can", "you", "your", "new", "now", "are", "is", "to", "in", "on", "of", "at", "by",
+        "this", "that", "these", "those", "about", "into", "over", "under", "after", "before",
+        "during", "while", "than", "then", "when", "where", "which", "who", "whom", "whose",
+        "will", "would", "could", "should", "may", "might", "must", "shall", "need", "dare",
+        "ought", "used", "better", "worse", "more", "most", "some", "many", "much", "such",
+        "all", "any", "both", "each", "every", "few", "less", "little", "other", "another",
+        "one", "two", "three", "first", "last", "next", "previous", "here", "there", "everywhere",
+        "nowhere", "somewhere", "everyone", "someone", "anyone", "no", "one", "nothing", "everything",
+        "something", "it", "its", "they", "them", "their", "we", "us", "our", "my", "his", "her",
+        "him", "she", "he", "i", "me", "already", "hit", "preview", "previews", "teaching",
+        "internet", "announced", "released", "launched", "introduces", "shows", "tests", "govern",
+    }
+    # Strip possessives and non-alpha, keep hyphens
+    t = re.sub(r"['’]s\b", "", title.lower())
+    t = re.sub(r"[^a-z0-9\s-]", "", t)
+    tokens = re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)*", t)
+
+    def tag(tok):
+        if tok in stop_words or len(tok) <= 2:
+            return None
+        if tok.endswith(("y", "er", "est", "ful", "ous", "ive", "al", "ing", "ed", "less", "able", "ible")):
+            return "adj"
+        return "noun"
+
+    phrases = []
+    i = 0
+    n = len(tokens)
+    while i < n:
+        window = [(tokens[j], tag(tokens[j])) for j in range(i, min(i + 8, n))]
+        first_noun = next((j for j, (_, tg) in enumerate(window) if tg == "noun"), None)
+        if first_noun is None:
+            i += 1
+            continue
+        start = first_noun
+        while start > 0 and window[start - 1][1] == "adj":
+            start -= 1
+        end = first_noun + 1
+        while end < len(window) and window[end][1] == "noun":
+            end += 1
+        phrase = " ".join(window[k][0] for k in range(start, end))
+        if len(phrase) > 3:
+            phrases.append(phrase)
+        i = end
+
+    if not phrases:
+        return ""
+    # Prefer longer phrase, then earlier in title
+    return max(phrases, key=lambda s: (len(s.split()), len(s)))
+
+
 def _visual_brief(
     title: str,
     linkedin_post: str,
@@ -74,8 +130,7 @@ def _visual_brief(
 ) -> dict:
     """Convert post metadata into a structured visual brief.
 
-    Returns a dict with keys: subject, entities, category, event,
-    visual_subject, visual_archetype, tone, pillar.
+    Returns a dict with keys: subject, visual_subject, category, event, tone, pillar.
     """
     clean_title = _clean_for_prompt(title, max_len=160)
     clean_post = _clean_for_prompt(linkedin_post, max_len=500)
@@ -83,48 +138,27 @@ def _visual_brief(
     text = f"{clean_title} {clean_post} {clean_hashtags}"
     text_lower = text.lower()
 
-    # Named entities: products, models, companies, APIs (proper noun groups)
-    entity_re = re.compile(
-        r"\b[A-Z][a-zA-Z0-9]*(?:\s+(?:[A-Z][a-zA-Z0-9]*|[0-9]+(?:\.[0-9]+)?))*\b"
-    )
-    raw_entities = [e.strip() for e in entity_re.findall(text) if len(e.strip()) > 2]
-    # Drop common false positives (single words that are not clearly proper)
-    stop_entities = {
-        "the", "new", "how", "why", "what", "this", "that", "with", "from", "about",
-        "your", "their", "our", "my", "his", "her", "its", "more", "most", "some",
-        "many", "much", "such", "than", "then", "when", "where", "which", "while",
-        "who", "whom", "whose", "will", "would", "could", "should", "may", "might",
-        "must", "shall", "can", "need", "dare", "ought", "used", "better", "worse",
-    }
-    entities = []
-    seen_entities = set()
-    for e in raw_entities:
-        if e.lower() in stop_entities:
-            continue
-        key = e.lower()
-        if key not in seen_entities:
-            seen_entities.add(key)
-            entities.append(e)
+    # Concrete visual subject: prefer the strongest noun phrase from the title.
+    visual_subject = (_extract_subject(clean_title) or clean_title[:80]).title()
 
     # Category detection from content signals
-    categories = []
+    category = "technology"
     category_signals = {
-        "security": ["security", "cyber", "vulnerability", "exploit", "threat", "malware", "red team", "jailbreak", "attack"],
+        "security": ["security", "cyber", "vulnerability", "exploit", "threat", "malware", "red team", "jailbreak", "attack", "cve", "payload"],
         "research": ["research", "paper", "study", "benchmark", "evaluation", "arxiv"],
         "model": ["llm", "language model", "foundation model", "model release", "gpt", "gemini", "claude"],
-        "product": ["launch", "release", "product", "tool", "platform", "app", "api"],
+        "product": ["launch", "release", "product", "tool", "platform", "app", "api", "framework"],
         "founder": ["founder", "startup", "strategy", "ceo", "entrepreneur"],
-        "agent": ["agent", "agentic", "multi-agent", "orchestration", "workflow"],
+        "agent": ["agent", "agentic", "multi-agent", "orchestration", "workflow", "delegate"],
         "code": ["coding", "developer", "code", "programming", "github", "repo"],
     }
     for cat, signals in category_signals.items():
         if any(s in text_lower for s in signals):
-            categories.append(cat)
-    if not categories:
-        categories.append("technology")
+            category = cat
+            break
 
     # Event detection
-    events = []
+    event = "concept"
     event_signals = {
         "launch": ["launch", "release", "drops", "announced", "introducing", "new"],
         "explainer": ["explained", "how", "what is", "primer", "guide", "breakdown"],
@@ -134,13 +168,8 @@ def _visual_brief(
     }
     for ev, signals in event_signals.items():
         if any(s in text_lower for s in signals):
-            events.append(ev)
-    if not events:
-        events.append("concept")
-
-    # Visual subject: prefer top entity, then title subject, then category noun
-    top_entity = entities[0] if entities else ""
-    visual_subject = top_entity or clean_title[:80]
+            event = ev
+            break
 
     # Tone from pillar + event
     pillar_lower = (pillar or "").lower()
@@ -155,19 +184,15 @@ def _visual_brief(
     }
     tone = tone_map.get(pillar_lower, "professional, clear")
 
-    # Visual archetype (default is chosen externally based on angle)
-    visual_archetype = "environment"
-
     return {
         "subject": clean_title[:120],
-        "entities": entities[:5],
-        "category": categories[0],
-        "event": events[0],
         "visual_subject": visual_subject,
-        "visual_archetype": visual_archetype,
+        "category": category,
+        "event": event,
         "tone": tone,
         "pillar": pillar,
     }
+
 
 
 def _extract_visual_keywords(title: str, linkedin_post: str, hashtags: str, source_url: str = "") -> tuple[str, str]:
@@ -472,69 +497,45 @@ def _visual_anchor(brief: dict, linkedin_post: str = "", angle: str = "") -> str
     """Pick a concrete, photographable anchor from the visual brief."""
     subject = brief.get("visual_subject") or brief.get("subject") or "technology"
     category = brief.get("category", "technology")
-    entities = brief.get("entities", [])
-    top_entity = entities[0] if entities else subject
     event = brief.get("event", "concept")
     angle = (angle or brief.get("visual_archetype", "environment")).lower()
 
-    # Concrete anchors per category + angle, avoiding abstract icons.
-    anchors = {
-        "security": {
-            "environment": f"a security operations centre with multiple screens and a single glowing lock symbol",
-            "message": f"a polished steel padlock resting on a glass table with red light bleeding underneath",
-            "focus": f"macro detail of a fingerprint scanner lens catching red light",
-            "pov": f"over-the-shoulder view of a security analyst typing while a threat-map glows on the monitor",
-        },
-        "model": {
-            "environment": f"a minimalist AI lab with a single sleek workstation displaying {top_entity} on a large monitor",
-            "message": f"a clean geometric neural-node sculpture glowing softly on a pedestal",
-            "focus": f"macro of a premium GPU edge with cyan data traces reflected on brushed metal",
-            "pov": f"first-person view of a builder reading {top_entity} results on a laptop screen",
-        },
-        "research": {
-            "environment": f"a quiet research library with an open laptop showing a scientific paper",
-            "message": f"a stack of printed charts next to a single glowing beaker on white marble",
-            "focus": f"macro of a research paper abstract with a soft pencil highlight",
-            "pov": f"over-the-shoulder of a researcher reviewing graphs on a monitor",
-        },
-        "product": {
-            "environment": f"a modern product launch stage with soft spotlights and a large screen",
-            "message": f"a premium product box floating on clean negative space with soft shadow",
-            "focus": f"macro product shot of a brushed-metal device edge catching window light",
-            "pov": f"hands holding a phone showing the {top_entity} app in a clean workspace",
-        },
-        "founder": {
-            "environment": f"a bright founder office with a whiteboard covered in strategy notes",
-            "message": f"a single chess piece on a wooden table in front of a floor-to-ceiling window",
-            "focus": f"macro of a notebook with a handwritten mission statement and a pen",
-            "pov": f"back-view of a founder presenting at a whiteboard to a small team",
-        },
-        "agent": {
-            "environment": f"a modern control room with three monitors showing connected node graphs",
-            "message": f"a constellation of glowing glass spheres linked by thin fibre-optic cables",
-            "focus": f"macro of a single glass node pulsing with blue light",
-            "pov": f"first-person view of an operator orchestrating agent flows on a dashboard",
-        },
-        "code": {
-            "environment": f"a tidy developer desk with two monitors, warm desk lamp, and a single potted plant",
-            "message": f"a clean sheet of code printed on translucent paper lit from behind",
-            "focus": f"macro of mechanical keyboard keys with soft RGB glow reflected on the desk",
-            "pov": f"over-the-shoulder of a developer reviewing code on a curved monitor",
-        },
+    # If subject is generic, fall back to category-specific noun
+    generic = {"technology", "ai", "artificial intelligence", "tool", "app", "platform", "internet"}
+    if subject.lower() in generic or len(subject) < 4:
+        subject = {
+            "security": "cybersecurity system",
+            "research": "AI research lab",
+            "model": "machine learning model",
+            "product": "software product",
+            "founder": "startup workspace",
+            "agent": "AI agent system",
+            "code": "developer workspace",
+        }.get(category, "modern technology")
+
+    # Angle templates that embed the actual subject.
+    templates = {
+        "environment": f"a real-world scene where {subject} is being built, tested, or used",
+        "message": f"one strong symbolic object that represents {subject} on generous negative space",
+        "focus": f"a premium macro detail of the core hardware, interface, or material behind {subject}",
+        "pov": f"a first-person over-the-shoulder view of a builder working with {subject}",
     }
+    anchor = templates.get(angle, templates["environment"])
 
-    cat_anchor = anchors.get(category, {}).get(angle)
-    if cat_anchor:
-        return cat_anchor
+    # Category-specific tweaks to avoid abstract clichés
+    if category == "security" and angle == "message":
+        anchor = f"a polished steel padlock on a glass table with soft red light, representing {subject}"
+    elif category == "agent" and angle == "message":
+        anchor = f"a constellation of glowing glass spheres linked by thin cables, symbolising {subject}"
+    elif category == "model" and angle == "focus":
+        anchor = f"macro of a premium GPU edge with cyan data traces reflected on brushed metal, core to {subject}"
+    elif category == "product" and angle == "environment":
+        anchor = f"a modern product launch stage with soft spotlights and a large screen showing {subject}"
+    elif category == "code" and angle == "pov":
+        anchor = f"over-the-shoulder of a developer reviewing code and diagrams related to {subject}"
 
-    # Fallback: build a literal scene from the subject and angle
-    if angle == "environment":
-        return f"a real-world workspace where {subject} is being built or tested"
-    if angle == "message":
-        return f"one strong symbolic object that represents {subject} on generous negative space"
-    if angle == "focus":
-        return f"a premium detail shot of the core hardware or interface behind {subject}"
-    return f"a builder working on {subject}, screen visible, shallow depth of field"
+    return anchor
+
 
 
 def _build_visual_scene(
@@ -550,142 +551,53 @@ def _build_visual_scene(
     tone = brief.get("tone", "professional")
 
     if angle == "environment":
-        return (
-            f"Wide establishing shot of {anchor}. "
-            f"Natural context for {subject}, soft ambient light, documentary editorial style, "
-            f"no text, no logos."
-        )
+        return f"Wide establishing shot of {anchor}. Natural context for {subject}, soft ambient light, documentary editorial style, no text, no logos."
     if angle == "message":
-        return (
-            f"Editorial still-life centered on {anchor}. "
-            f"Generous negative space, magazine-cover lighting, the image should communicate "
-            f"the core idea of {subject}. No text, no logos."
-        )
+        return f"Editorial still-life centered on {anchor}. Generous negative space, magazine-cover lighting, communicating the core idea of {subject}. No text, no logos."
     if angle == "focus":
-        return (
-            f"Premium macro detail: {anchor}. "
-            f"Razor-sharp focal point, creamy bokeh, professional product photography, "
-            f"no text, no logos."
-        )
+        return f"Premium macro detail: {anchor}. Razor-sharp focal point, creamy bokeh, professional product photography, no text, no logos."
     if angle == "pov":
-        return (
-            f"First-person over-the-shoulder view: {anchor}. "
-            f"Shallow depth of field, authentic workspace, human scale, no text, no logos."
-        )
+        return f"First-person over-the-shoulder view: {anchor}. Shallow depth of field, authentic workspace, human scale, no text, no logos."
     return f"Professional editorial hero shot of {subject}, centered composition, clean background, photorealistic, no text, no logos."
 
 
+
 def _build_style(pillar: str, brief: dict | None = None, stock_style: bool = False) -> str:
-    """Build a topic-aware style string."""
+    """Build a concise topic-aware style string."""
     pillar_lower = (pillar or "").lower()
     tone = brief.get("tone", "") if brief else ""
     category = brief.get("category", "") if brief else ""
-    parts = []
 
     if stock_style:
-        parts.append(
+        return (
             "authentic photorealistic stock photograph, clean professional business look, "
             "subtle depth of field, natural color grading, no stylized illustration, no text or labels, "
             "1.91:1 landscape"
         )
-        return ", ".join(parts)
 
-    # Pillar-driven mood with concrete visual language
+    mood = "photorealistic modern tech editorial, clean composition, professional LinkedIn cover style"
     if "viral" in pillar_lower:
-        parts.append(
-            "bold news-style editorial photography, strong focal point, high contrast, "
-            "clean typography-free composition, scroll-stopping hero image"
-        )
+        mood = "bold news-style editorial photography, strong focal point, high contrast, scroll-stopping hero image"
     elif "security" in pillar_lower or category == "security":
-        parts.append(
-            "dark cybersecurity documentary scene, subtle red-amber glow on deep blue-grey, "
-            "cinematic contrast, sharp detail, no stylized illustration"
-        )
+        mood = "dark cybersecurity documentary scene, subtle red-amber glow on deep blue-grey, cinematic contrast"
     elif "founder" in pillar_lower:
-        parts.append(
-            "warm strategic editorial portrait lighting, natural window light, "
-            "authentic founder-office textures, documentary style"
-        )
+        mood = "warm strategic editorial portrait lighting, natural window light, authentic founder-office textures"
     elif "tool" in pillar_lower or category == "product":
-        parts.append(
-            "clean product-forward editorial, soft studio lighting, premium materials, "
-            "minimal clutter, high detail"
-        )
+        mood = "clean product-forward editorial, soft studio lighting, premium materials, minimal clutter"
     elif "builder" in pillar_lower or category == "code":
-        parts.append(
-            "authentic developer workspace photography, focused screen glow, "
-            "warm practical lighting, photorealistic textures"
-        )
-    elif "agent" in pillar_lower or category == "agent":
-        parts.append(
-            "photorealistic 3D render of connected glass nodes, soft blue-purple glow, "
-            "minimal dark background, technical editorial, no text"
-        )
+        mood = "authentic developer workspace photography, focused screen glow, warm practical lighting"
+    elif category == "agent":
+        mood = "photorealistic 3D render of connected glass nodes, soft blue-purple glow, minimal dark background"
     elif category == "model":
-        parts.append(
-            "modern tech editorial, clean composition, subtle cyan-violet light, "
-            "professional LinkedIn cover style, no text"
-        )
+        mood = "modern tech editorial, clean composition, subtle cyan-violet light, professional LinkedIn cover style"
     elif category == "research":
-        parts.append(
-            "clean scientific editorial, crisp whites and soft accent lighting, "
-            "documentary precision, no text"
-        )
+        mood = "clean scientific editorial, crisp whites and soft accent lighting, documentary precision"
     elif "tomorrow" in pillar_lower:
-        parts.append(
-            "optimistic wide horizon editorial, dawn light, subtle data streams, "
-            "cinematic hopeful mood, no text"
-        )
-    else:
-        parts.append(
-            "photorealistic modern tech editorial, clean composition, professional LinkedIn cover style, no text"
-        )
+        mood = "optimistic wide horizon editorial, warm dawn light, subtle futuristic atmosphere"
 
-    # Add tone if not already captured
-    if tone and not any(t.lower() in " ".join(parts).lower() for t in tone.split(",")):
-        parts.append(tone)
+    return f"{mood}, 1.91:1 landscape, high detail, sharp focus, cinematic lighting, no text, no logos"
 
-    parts.append("1.91:1 landscape, high detail, sharp focus, cinematic lighting")
-    return ", ".join(parts)
 
-    # Topic-driven mood
-    if "security" in p or "red team" in k or "vulnerability" in k:
-        parts.append(
-            "dark cybersecurity editorial scene, subtle lock-shield geometry, amber-red glow on deep blue, "
-            "moody cinematic, sharp detail"
-        )
-    elif "agent" in k or "multi-agent" in k or "orchestration" in k:
-        parts.append(
-            "photorealistic 3D render of connected nodes, soft blue-purple glow, "
-            "minimal dark background, technical editorial, sharp detail, no text"
-        )
-    elif "llm" in k or "model" in k or "transformer" in k or "attention" in k:
-        parts.append(
-            "photorealistic 3D render of layered neural geometry, soft cyan and violet light, "
-            "futuristic but clean, high detail, no text"
-        )
-    elif "code" in k or "developer" in k or "builder" in k or "deploy" in k:
-        parts.append(
-            "photorealistic developer workspace, focused screen glow, warm practical lighting, "
-            "authentic textures, no readable text or UI labels"
-        )
-    elif "founder" in k or "startup" in k or "strategy" in k:
-        parts.append(
-            "photorealistic strategic office scene, whiteboard or market chart, soft natural window light, "
-            "back-or-side view silhouette, no readable text or labels"
-        )
-    elif "future" in k or "prediction" in k or "horizon" in k:
-        parts.append(
-            "photorealistic wide futuristic horizon, dawn cityscape silhouette, glowing data streams, "
-            "one central symbol, cinematic optimistic mood, no text"
-        )
-    else:
-        parts.append(
-            "photorealistic modern tech editorial, clean composition, professional LinkedIn cover style, no text"
-        )
-
-    parts.append("1.91:1 landscape, high detail, sharp focus, cinematic lighting")
-    return ", ".join(parts)
 
 def prompt_for_post(
     day: str,
@@ -697,12 +609,11 @@ def prompt_for_post(
     stock_style: bool = False,
     source_url: str = "",
 ) -> str:
-    """Build a LinkedIn-optimized, topic-aware image prompt from post metadata.
+    """Build a simple, high-relevance LinkedIn cover-image prompt.
 
     The optional `angle` lets us generate multiple AI variants from different
-    perspectives / environments / messages / POVs while keeping the same core
-    subject. `stock_style` requests a photorealistic stock-photo look for
-    non-AI fallback slots.
+    perspectives (environment / message / focus / POV) while keeping the same
+    concrete subject.
     """
     brief = _visual_brief(title, linkedin_post, hashtags, source_url, pillar)
     if angle:
@@ -711,26 +622,14 @@ def prompt_for_post(
     scene = _build_visual_scene(angle or brief.get("visual_archetype", "environment"), brief, source_url, linkedin_post)
     style = _build_style(pillar, brief, stock_style)
 
-    prompt = (
-        f"### SUBJECT\n"
-        f"A LinkedIn cover image about {brief['subject']}. "
-        f"Main visual focus: {brief['visual_subject']}.\n\n"
-        f"### VISUAL\n"
-        f"{scene}\n\n"
-        f"### COMPOSITION\n"
-        f"Wide horizontal 1.91:1 landscape format, strong focal point, clean framing, "
-        f"intentional negative space, no clutter.\n\n"
-        f"### MOOD\n"
-        f"{brief.get('tone', 'professional')}.\n\n"
-        f"### STYLE\n"
-        f"{style}\n\n"
-        f"### FORMAT\n"
-        f"1.91:1 landscape, 1200x627, photorealistic, high detail, sharp focus, cinematic lighting.\n\n"
-        f"### RESTRICTIONS\n"
-        f"No text, letters, numbers, words, logos, watermarks, trademarks, UI chrome, "
+    return (
+        f"LinkedIn cover image about {brief['visual_subject']}.\n"
+        f"Scene: {scene}\n"
+        f"Style: {style}.\n"
+        f"Restrictions: no text, letters, numbers, words, logos, watermarks, trademarks, UI chrome, "
         f"captions, or readable labels. No people unless the scene explicitly calls for them."
     )
-    return prompt
+
 
 
 def _fetch_og_image(url: str, output_path: Path) -> Path | None:
@@ -952,21 +851,25 @@ def _search_pexels(query: str, output_path: Path, index: int = 0) -> Path | None
 
 def _extract_pexels_query(day: str, pillar: str, title: str) -> str:
     """Create a simple search query for Pexels from post metadata."""
-    if "security" in pillar.lower():
-        return "cybersecurity technology dark"
-    if "founder" in pillar.lower():
-        return "business strategy office laptop"
-    if "tool" in pillar.lower():
-        return "software technology dashboard"
-    if "builder" in pillar.lower():
-        return "developer coding workspace"
-    if "tomorrow" in pillar.lower():
-        return "futuristic technology horizon"
-    if "viral" in pillar.lower():
-        return "technology innovation abstract"
-    if "pattern" in pillar.lower():
-        return "network technology abstract"
-    return "technology abstract"
+    pillar_map = {
+        "security_signal": "cybersecurity technology dark",
+        "founder_signal": "business strategy office laptop",
+        "tool_drop": "software technology dashboard",
+        "builder_memo": "developer coding workspace",
+        "tomorrow_in_ai": "futuristic technology horizon",
+        "viral_explained": "technology innovation abstract",
+        "pattern_spotting": "network technology abstract",
+    }
+    generic = pillar_map.get((pillar or "").lower(), "technology abstract")
+
+    clean = _clean_for_prompt(title, max_len=80)
+    words = [w for w in re.findall(r"[A-Za-z0-9]+", clean) if len(w) > 3 and w.lower() not in {"about", "with", "from", "this", "that", "their", "your", "already", "previews", "preview", "internet"}]
+    keyword_phrase = " ".join(words[:3])
+
+    if keyword_phrase:
+        return f"{keyword_phrase} {generic}"
+    return generic
+
 
 
 def _score_candidate(
@@ -1053,53 +956,61 @@ def candidates_for_post(
         (active_image_path, candidate_paths, source_label)
 
     Policy:
-      - Up to 2 non-AI candidates: OG/Twitter/article images first, then Unsplash fallback.
-      - Up to 2 AI-generated candidates from different angles: environment, message, focus, pov.
-      - The active image is the first usable non-AI candidate if available, otherwise the first
-        successful AI-generated candidate.
+      - Exactly 4 candidates when possible: 2 non-AI (article/stock) + 2 AI.
+      - AI candidates use two different angles from [environment, message, focus, pov].
+      - The active image is the highest-scoring candidate.
     """
     if not item_url:
         return None, [], "none"
 
     chosen_provider = provider or IMAGE_PROVIDER
-    candidates_dir = IMAGE_CANDIDATES_DIR / (item_id or _slug(title) or "draft")
+    slug = item_id or _slug(title) or "draft"
+    candidates_dir = IMAGE_CANDIDATES_DIR / slug
     candidates_dir.mkdir(parents=True, exist_ok=True)
-    # Stable seed derived from title+item_id so re-runs are deterministic but per-item unique.
-    base_seed = abs(hash(f"{title or item_url or ''}:{item_id or ''}:{chosen_provider}")) % (2**31)
+    base_seed = abs(hash(f"{title or item_url or ''}:{slug}:{chosen_provider}")) % (2**31)
 
     non_ai: list[Path] = []
-    ai: list[Path] = []
+    non_ai_sources: list[str] = []
 
-    # 1. Non-AI: article/OG/Twitter images (deduplicated by dHash)
-    article_cands = extract_article_images(item_url, item_id or _slug(title), max_candidates=NON_AI_CANDIDATES)
+    # 1. Article images (OpenGraph/Twitter/body), deduplicated
+    article_cands = extract_article_images(item_url, slug, max_candidates=NON_AI_CANDIDATES)
     for p in article_cands:
         path = Path(p)
         if path.exists() and _is_usable_size(path) and path not in non_ai:
             non_ai.append(path)
+            non_ai_sources.append("article")
         if len(non_ai) >= NON_AI_CANDIDATES:
             break
 
-    # 2. Non-AI fallback: Pexels. If we have strong article images, skip Pexels too.
-    if len(non_ai) < NON_AI_CANDIDATES:
+    # 2. Stock fallback (Pexels)
+    if len(non_ai) < NON_AI_CANDIDATES and PEXELS_API_KEY:
         stock_query = _extract_pexels_query(day, pillar, title)
-        needed = NON_AI_CANDIDATES - len(non_ai)
-        for i in range(needed):
+        for i in range(NON_AI_CANDIDATES - len(non_ai)):
             out = candidates_dir / f"pexels_{i}.jpg"
             result = _search_pexels(stock_query, out, index=i)
             if result and _is_usable_size(result) and result not in non_ai:
                 non_ai.append(result)
+                non_ai_sources.append("stock")
             if len(non_ai) >= NON_AI_CANDIDATES:
                 break
 
-    # 3. AI candidates: fallback only if we still need more options.
-    # We want exactly 4 total candidates. Compute how many AI slots are needed.
-    ai_slots_needed = AI_CANDIDATES
-    shortfall = (NON_AI_CANDIDATES + AI_CANDIDATES) - (len(non_ai) + ai_slots_needed)
-    if shortfall > 0:
-        ai_slots_needed += shortfall
+    # 3. Unsplash fallback if still short
+    if len(non_ai) < NON_AI_CANDIDATES:
+        stock_query = _build_unsplash_query(day, pillar, title, linkedin_post, hashtags)
+        for i in range(NON_AI_CANDIDATES - len(non_ai)):
+            out = candidates_dir / f"unsplash_{i}.jpg"
+            result = _download_unsplash(stock_query, out)
+            if result and _is_usable_size(result) and result not in non_ai:
+                non_ai.append(result)
+                non_ai_sources.append("stock")
+            if len(non_ai) >= NON_AI_CANDIDATES:
+                break
 
+    # 4. AI candidates: always attempt 2 distinct angles
+    ai: list[Path] = []
+    ai_sources: list[str] = []
     all_angles = ["environment", "message", "focus", "pov"]
-    pair_offset = (base_seed + hash(str(item_id or title))) % 4
+    pair_offset = base_seed % 4
     angle_pairs = [
         ["environment", "message"],
         ["focus", "pov"],
@@ -1107,12 +1018,9 @@ def candidates_for_post(
         ["message", "pov"],
     ]
     chosen_angles = angle_pairs[pair_offset]
-    # If we need more than 2 AI angles, append the remaining angles
-    extra_angles = [a for a in all_angles if a not in chosen_angles]
-    chosen_angles = chosen_angles + extra_angles
 
     for idx, angle in enumerate(chosen_angles):
-        if len(ai) >= ai_slots_needed:
+        if len(ai) >= AI_CANDIDATES:
             break
         prompt = prompt_for_post(day, pillar, title, linkedin_post, hashtags, angle=angle, source_url=item_url)
         logger.info("AI image prompt (%s): %s", angle, prompt)
@@ -1121,21 +1029,36 @@ def candidates_for_post(
         result = _generate_image(prompt, out, chosen_provider, seed=seed, model="flux-realism")
         if result and _is_usable_size(result) and result not in ai:
             ai.append(result)
+            ai_sources.append(f"AI · {angle}")
+
+    # If AI generation failed, fill remaining slots with generic AI fallbacks
+    for idx, angle in enumerate([a for a in all_angles if a not in [x.split()[-1] for x in ai_sources]]):
+        if len(ai) >= AI_CANDIDATES:
+            break
+        prompt = prompt_for_post(day, pillar, title, linkedin_post, hashtags, angle=angle, source_url=item_url)
+        out = candidates_dir / f"ai_{angle}_fallback.png"
+        seed = base_seed + idx + 200
+        result = _generate_image(prompt, out, chosen_provider, seed=seed, model="flux-realism")
+        if result and _is_usable_size(result) and result not in ai:
+            ai.append(result)
+            ai_sources.append(f"AI · {angle}")
 
     # Combine candidates with active selection
-    all_candidates = [str(p) for p in non_ai + ai]
+    all_paths = non_ai + ai
+    all_sources = non_ai_sources + ai_sources
+    all_candidates = [str(p) for p in all_paths]
+
     if len(all_candidates) < 4:
         logger.warning(
-            "Only %s/%s candidates generated for %s (non_ai=%s ai=%s)",
-            len(all_candidates), NON_AI_CANDIDATES + AI_CANDIDATES,
-            item_id or title, len(non_ai), len(ai)
+            "Only %s/%s candidates generated for %s",
+            len(all_candidates), NON_AI_CANDIDATES + AI_CANDIDATES, slug,
         )
 
     # Rank candidates and pick the best as the active image
     brief = _visual_brief(title, linkedin_post, hashtags, item_url, pillar)
     scored: list[tuple[float, Path, str]] = []
-    for idx, p in enumerate(non_ai + ai):
-        source_label = "article" if p in non_ai[:1] else ("stock" if ("pexels" in p.name or "unsplash" in p.name) else "ai")
+    for idx, p in enumerate(all_paths):
+        source_label = all_sources[idx]
         angle = chosen_angles[idx - len(non_ai)] if idx >= len(non_ai) else ""
         score = _score_candidate(p, brief, source_label, angle)
         scored.append((score, p, source_label))
@@ -1144,13 +1067,14 @@ def candidates_for_post(
     active = scored[0][1] if scored else None
     source = scored[0][2] if scored else "none"
 
-    # Reorder candidates so the top-scored is first, while preserving source grouping
     ranked_paths = [str(p) for _s, p, _l in scored]
-    # Ensure all original candidates are present
-    remaining = [c for c in all_candidates if c not in ranked_paths]
-    all_candidates = ranked_paths + remaining
+    ranked_sources = [l for _s, _p, l in scored]
+    remaining = [(c, all_sources[all_candidates.index(c)]) for c in all_candidates if c not in ranked_paths]
+    final_paths = ranked_paths + [c for c, _ in remaining]
+    final_sources = ranked_sources + [s for _, s in remaining]
 
-    return active, all_candidates, source
+    return active, final_paths, source, final_sources
+
 
 
 def image_for_post(
@@ -1185,7 +1109,7 @@ def image_for_post(
             return cache_path, "cache"
         logger.warning("Cached image too small, ignoring: %s", cache_path)
 
-    active, candidates, source = candidates_for_post(
+    active, candidates, source, _candidate_sources = candidates_for_post(
         item_url=item_url,
         title=title,
         day=day,

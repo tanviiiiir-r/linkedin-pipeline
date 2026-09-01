@@ -151,6 +151,8 @@ def _hydrate_draft(
         image_path=item.image_path if hasattr(item, "image_path") else "",
         image_source=item.image_source if hasattr(item, "image_source") else "",
         image_candidates=item.image_candidates if hasattr(item, "image_candidates") else [],
+        image_candidate_sources=[],
+        scheduled_for=item.expires_at if hasattr(item, "expires_at") else "",
     )
 
 

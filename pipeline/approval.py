@@ -6,6 +6,54 @@ from pathlib import Path
 from config import settings as _settings
 from pipeline.drafting import Draft, _draft_markdown, _parse_draft_markdown, load_drafts
 
+
+def _split_frontmatter(text: str) -> tuple[str | None, str | None]:
+    m = re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", text, re.DOTALL)
+    if not m:
+        return None, None
+    return m.group(1).strip(), m.group(2).strip()
+
+
+def _parse_planned_markdown(path: Path) -> Draft | None:
+    """Convert a planned item markdown into a scheduled Draft."""
+    try:
+        text = path.read_text()
+    except OSError:
+        return None
+    frontmatter, body = _split_frontmatter(text)
+    if not frontmatter:
+        return None
+    try:
+        data = json.loads(frontmatter)
+    except json.JSONDecodeError:
+        return None
+    title = data.get("item_title", "")
+    source_url = data.get("item_url", "")
+    summary = data.get("summary", "")
+    pillar_candidates = data.get("pillar_candidates", []) or []
+    pillar = pillar_candidates[0] if pillar_candidates else "tomorrow_in_ai"
+    expires_at = data.get("expires_at", "")
+    image_path = data.get("image_path", "")
+    image_candidates = data.get("image_candidates", []) or []
+
+    # Build a minimal post body from the summary if no LinkedIn post exists.
+    post = f"Scheduled: {title}\n\n{summary}".strip()
+
+    return Draft(
+        item_id=data.get("id", ""),
+        pillar=pillar,
+        title=title,
+        source_url=source_url,
+        created_at=data.get("collected_at", ""),
+        linkedin_post=post,
+        newsletter_section=summary,
+        short_pill=summary,
+        hashtags=[f"#{p.title()}" for p in pillar.replace("_", " ").split()] if pillar else [],
+        image_path=image_path,
+        image_candidates=[str(p) for p in image_candidates],
+        scheduled_for=expires_at,
+    )
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,9 +70,24 @@ def _approved_dir() -> Path:
     return _queue_dir() / "approved"
 
 
+def list_scheduled() -> list[Draft]:
+    """Return future-dated drafts from the planned folder."""
+    scheduled_dir = _settings.PLANNED_DIR
+    if not scheduled_dir.exists():
+        return []
+    drafts: list[Draft] = []
+    seen: set[str] = set()
+    for path in sorted(scheduled_dir.glob("*.md"), reverse=True):
+        draft = _parse_planned_markdown(path)
+        if draft and draft.item_id and draft.item_id not in seen:
+            drafts.append(draft)
+            seen.add(draft.item_id)
+    return drafts
+
+
 def list_pending() -> list[Draft]:
     """Return drafts awaiting human approval."""
-    return [d for d in load_drafts(_queue_dir()) if not d.approved and not d.published]
+    return [d for d in load_drafts(_queue_dir()) if not d.approved and not d.published and not d.scheduled_for]
 
 
 def list_ready_to_publish() -> list[Draft]:

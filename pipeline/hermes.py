@@ -573,7 +573,7 @@ def cmd_draft_today(args) -> int:
 
         if not skip_image:
             # Build a full candidate set: 2 non-AI + 2 AI from different angles.
-            active_path, candidate_paths, img_source = candidates_for_post(
+            active_path, candidate_paths, img_source, candidate_sources = candidates_for_post(
                 item_url=item.item_url,
                 title=draft.title,
                 day=plan.day_name,
@@ -587,6 +587,7 @@ def cmd_draft_today(args) -> int:
                 draft.image_path = str(active_path)
                 draft.image_source = img_source
                 draft.image_candidates = candidate_paths
+                draft.image_candidate_sources = candidate_sources
                 item.image_path = str(active_path)
                 item.image_source = img_source
                 item.image_candidates = candidate_paths

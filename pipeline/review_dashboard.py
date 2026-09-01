@@ -84,7 +84,7 @@ def _candidate_source_label(candidate: str) -> str:
     if any(x in lower for x in ("unsplash", "pexels")):
         return "stock"
     if "ai_stock" in lower:
-        return "AI stock"
+        return "AI fallback"
     if "environment" in lower:
         return "AI · environment"
     if "message" in lower:
@@ -195,6 +195,7 @@ _HTML_TEMPLATE = '''<!DOCTYPE html>
   <main class="wrap">
     <div class="tabs">
       <button class="tab active" data-tab="pending" onclick="switchTab('pending')">⏳ Queued</button>
+      <button class="tab" data-tab="scheduled" onclick="switchTab('scheduled')">📅 Scheduled</button>
       <button class="tab" data-tab="approved" onclick="switchTab('approved')">✅ Approved</button>
       <button class="tab" data-tab="rejected" onclick="switchTab('rejected')">🗑 Rejected</button>
     </div>
@@ -607,7 +608,7 @@ _JS = '''(function() {
     const lower = candidate.toLowerCase();
     if (lower.includes('og.jpg') || lower.includes('article_')) return 'article';
     if (lower.includes('unsplash') || lower.includes('pexels')) return 'stock';
-    if (lower.includes('ai_stock')) return 'AI stock';
+    if (lower.includes('ai_stock')) return 'AI fallback';
     if (lower.includes('environment')) return 'AI · environment';
     if (lower.includes('message')) return 'AI · message';
     if (lower.includes('focus')) return 'AI · focus';
@@ -818,6 +819,11 @@ _JS = '''(function() {
         btn('approve', '✅ Approve', () => approve(draft.item_id)),
         btn('skip', '🗑 Delete', () => skip(draft.item_id))
       );
+    } else if (draft.status === 'scheduled') {
+      actions.append(
+        btn('approve', '✅ Approve now', () => approve(draft.item_id)),
+        btn('skip', '⏭ Skip', () => skip(draft.item_id))
+      );
     }
 
     // edit box
@@ -890,7 +896,8 @@ _JS = '''(function() {
     const messages = {
       pending: '<div class="empty-icon">📭</div><h2>No pending drafts</h2><p>Run <code>python run.py draft-today --with-image</code> to create one for review.</p>',
       approved: '<div class="empty-icon">✅</div><h2>No approved drafts</h2><p>Approve drafts from the Queued tab to see them here.</p>',
-      rejected: '<div class="empty-icon">🗑</div><h2>No rejected drafts</h2><p>Rejected drafts older than 7 days are automatically cleared.</p>'
+      rejected: '<div class="empty-icon">🗑</div><h2>No rejected drafts</h2><p>Rejected drafts older than 7 days are automatically cleared.</p>',
+      scheduled: '<div class="empty-icon">📅</div><h2>No scheduled drafts</h2><p>Future-dated planned items will appear here.</p>'
     };
     article.innerHTML = messages[tab] || messages.pending;
     return article;

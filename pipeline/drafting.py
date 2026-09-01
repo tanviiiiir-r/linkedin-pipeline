@@ -35,6 +35,8 @@ class Draft(BaseModel):
     image_path: str = ""
     image_source: str = ""
     image_candidates: list[str] = []
+    image_candidate_sources: list[str] = []
+    scheduled_for: str = ""
 
 
 PILLAR_HASHTAGS = {
@@ -163,6 +165,8 @@ Read more: {url}
         forward_pill=forward_pill,
         narrative_pill=narrative_pill,
         hashtags=tags,
+        image_candidate_sources=[],
+        scheduled_for="",
     )
 
 
@@ -188,6 +192,8 @@ published: {draft.published}
 image_path: {draft.image_path}
 image_source: {draft.image_source}
 image_candidates: {json.dumps(draft.image_candidates)}
+image_candidate_sources: {json.dumps(draft.image_candidate_sources)}
+scheduled_for: {draft.scheduled_for}
 hashtags: {', '.join(draft.hashtags)}
 ---
 
@@ -272,6 +278,8 @@ def _parse_draft_markdown(text: str) -> Draft | None:
         image_path=data.get("image_path", ""),
         image_source=data.get("image_source", ""),
         image_candidates=json.loads(data.get("image_candidates") or "[]"),
+        image_candidate_sources=json.loads(data.get("image_candidate_sources") or "[]"),
+        scheduled_for=data.get("scheduled_for", ""),
         linkedin_post=sections.get("LinkedIn Post", ""),
         newsletter_section=sections.get("Newsletter Section", ""),
         short_pill=sections.get("Short Pill", ""),

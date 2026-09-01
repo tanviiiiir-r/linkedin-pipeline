@@ -23,6 +23,7 @@ from pipeline.approval import (
     list_approved,
     list_pending,
     list_rejected,
+    list_scheduled,
     skip_draft,
 )
 from pipeline.drafting import Draft, _draft_markdown, _parse_draft_markdown
@@ -220,6 +221,7 @@ def _draft_to_json(draft: Draft, analysis: dict | None = None, status: str = "pe
         "created_at": draft.created_at,
         "approved_at": draft.approved_at,
         "status": status,
+        "scheduled_for": draft.scheduled_for,
         "analysis": analysis or {},
     }
     return out
@@ -290,8 +292,11 @@ class _Handler(BaseHTTPRequestHandler):
         elif status == "rejected":
             drafts = list_rejected()
             status_label = "rejected"
+        elif status == "scheduled":
+            drafts = list_scheduled()
+            status_label = "scheduled"
         else:
-            _json_response(self, 400, {"ok": False, "error": "status must be pending, approved, or rejected"})
+            _json_response(self, 400, {"ok": False, "error": "status must be pending, approved, rejected, or scheduled"})
             return
 
         analysis_map = {}

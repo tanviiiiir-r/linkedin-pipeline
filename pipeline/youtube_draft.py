@@ -176,7 +176,7 @@ def draft_from_youtube_url(url: str) -> Draft | None:
     try:
         from config.calendar import day_plan
         plan = day_plan()
-        active_path, candidate_paths, img_source = candidates_for_post(
+        active_path, candidate_paths, img_source, candidate_sources = candidates_for_post(
             item_url=item.item_url,
             title=draft.title,
             day=plan.day_name,
@@ -189,6 +189,7 @@ def draft_from_youtube_url(url: str) -> Draft | None:
             draft.image_path = str(active_path)
             draft.image_source = img_source
             draft.image_candidates = candidate_paths
+            draft.image_candidate_sources = candidate_sources
             item.image_path = str(active_path)
             item.image_source = img_source
             item.image_candidates = candidate_paths

@@ -20,7 +20,7 @@ def test_clean_for_prompt_strips_urls_and_tags():
 
 def test_prompt_for_post_has_no_text_request():
     p = prompt_for_post("Monday", "tool_drop", "New AI tool drops", "We got a tool.", "#AI")
-    assert "No text" in p or "free of text" in p.lower()
+    assert "no text" in p.lower() or "free of text" in p.lower()
     assert "1.91:1" in p or "landscape" in p.lower()
 
 

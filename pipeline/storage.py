@@ -47,6 +47,9 @@ class Item(BaseModel):
     image_path: str = ""
     image_source: str = ""  # source_native | og | article | comfy | placeholder
     image_candidates: list[str] = Field(default_factory=list)
+    queue_type: str = "breaking"
+    expires_at: str = ""
+    engagement: dict = Field(default_factory=dict)
 
     model_config = {"extra": "ignore"}
 
@@ -100,11 +103,19 @@ def init_db() -> None:
     )
     for idx in _ALLOWED_INDEX_COLUMNS:
         conn.execute(f"CREATE INDEX IF NOT EXISTS idx_items_{idx} ON items({idx})")
-    # Migration: ensure image_path column exists on older databases
-    try:
-        conn.execute("ALTER TABLE items ADD COLUMN image_path TEXT DEFAULT ''")
-    except sqlite3.OperationalError:
-        pass  # column already exists
+    # Migration: ensure all newer columns exist on older databases
+    for col_sql in [
+        "ALTER TABLE items ADD COLUMN image_path TEXT DEFAULT ''",
+        "ALTER TABLE items ADD COLUMN queue_type TEXT DEFAULT 'breaking'",
+        "ALTER TABLE items ADD COLUMN expires_at TEXT",
+        "ALTER TABLE items ADD COLUMN engagement TEXT",
+        "ALTER TABLE items ADD COLUMN image_source TEXT DEFAULT ''",
+        "ALTER TABLE items ADD COLUMN image_candidates TEXT DEFAULT ''",
+    ]:
+        try:
+            conn.execute(col_sql)
+        except sqlite3.OperationalError:
+            pass  # column already exists
     conn.commit()
     conn.close()
 
@@ -190,15 +201,21 @@ def save_item(item: Item) -> Path:
         """
         INSERT INTO items (id, source_name, source_url, item_url, item_title, item_author,
             published_at, collected_at, source_type, content_type, summary, key_claims,
-            raw_content, pillar_candidates, topics, status, signal_strength, url_hash, image_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            raw_content, pillar_candidates, topics, status, signal_strength, url_hash, image_path,
+            queue_type, expires_at, engagement, image_source, image_candidates)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(item_url) DO UPDATE SET
             collected_at=excluded.collected_at,
             status=excluded.status,
             summary=excluded.summary,
             key_claims=excluded.key_claims,
             raw_content=excluded.raw_content,
-            image_path=excluded.image_path
+            image_path=excluded.image_path,
+            queue_type=excluded.queue_type,
+            expires_at=excluded.expires_at,
+            engagement=excluded.engagement,
+            image_source=excluded.image_source,
+            image_candidates=excluded.image_candidates
         """,
         (
             item.id, item.source_name, item.source_url, item.item_url, item.item_title,
@@ -206,6 +223,8 @@ def save_item(item: Item) -> Path:
             item.content_type, item.summary, json.dumps(item.key_claims), item.raw_content,
             json.dumps(item.pillar_candidates), json.dumps(item.topics), item.status,
             item.signal_strength, item.url_hash, item.image_path,
+            item.queue_type, item.expires_at, json.dumps(item.engagement),
+            item.image_source, json.dumps(item.image_candidates),
         ),
     )
     conn.commit()
@@ -276,13 +295,24 @@ def _item_from_row(row) -> Item:
     for key in keys:
         value = row[key]
         if value is None:
-            data[key] = [] if key in ("key_claims", "pillar_candidates", "topics", "image_candidates") else "" if key in ("reddit_permalink",) else 0 if key in ("reddit_score", "reddit_comments") else value
+            data[key] = (
+                [] if key in ("key_claims", "pillar_candidates", "topics", "image_candidates")
+                else {} if key == "engagement"
+                else "" if key in ("reddit_permalink", "expires_at")
+                else 0 if key in ("reddit_score", "reddit_comments")
+                else value
+            )
             continue
         if key in ("key_claims", "pillar_candidates", "topics", "image_candidates"):
             try:
                 data[key] = json.loads(value)
             except (json.JSONDecodeError, TypeError):
                 data[key] = []
+        elif key == "engagement":
+            try:
+                data[key] = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                data[key] = {}
         elif key in ("reddit_score", "reddit_comments"):
             try:
                 data[key] = int(value)

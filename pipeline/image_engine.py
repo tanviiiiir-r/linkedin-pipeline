@@ -29,7 +29,7 @@ FAL_KEY = os.getenv("FAL_KEY", "")
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
 
 # Fal model alias (cheap + fast)
-FAL_MODEL = os.getenv("FAL_MODEL", "fal-ai/flux/schnell")
+FAL_MODEL = os.getenv("FAL_MODEL", "fal-ai/ideogram/v3")
 
 IMAGE_DIR = DATA_DIR / "images"
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
@@ -603,32 +603,65 @@ def _dhash_image(path: Path, size: int = 8) -> str | None:
         return None
 
 def _visual_anchor(brief: dict, linkedin_post: str = "", angle: str = "") -> str:
-    """Pick a concrete, photographable anchor from the visual brief."""
+    """Pick a concrete, story-driven visual anchor from the brief.
+
+    The anchor describes one clear, photographable moment so the image tells a
+    story even without text. Angles are: environment (scene), focus (detail),
+    message (symbol), pov (builder view).
+    """
     angle = (angle or "environment").lower()
     entity = brief.get("entity") or brief.get("visual_subject") or brief.get("subject") or "technology"
     category = brief.get("category", "technology")
+    event = brief.get("event", "concept")
 
-    # Normalize generic entities to concrete subjects by category
+    # Concrete subject by category, avoiding generic words like "AI" or "tool".
     generic = {"technology", "ai", "artificial intelligence", "tool", "app", "platform", "internet", "software", "hardware", "innovation"}
-    visual_subject = entity
     if entity.lower() in generic or len(entity) < 4:
         visual_subject = {
-            "security": "a security workstation with network hardware",
-            "research": "a research analysis desk with charts and instruments",
-            "model": "a machine learning workstation with GPU hardware",
-            "product": "a modern software product on a laptop screen",
-            "founder": "a strategic founder workspace",
-            "agent": "an agent orchestration dashboard on a monitor",
-            "code": "a developer workstation with code on screen",
-        }.get(category, "a modern technology workspace")
+            "security": "a security analyst workstation with monitors and network hardware",
+            "research": "a research analysis desk with charts, instruments, and a laptop",
+            "model": "a machine learning workstation with GPU hardware and model graphs",
+            "product": "a modern software product shown on a laptop or phone screen",
+            "founder": "a strategic founder workspace with notebook and laptop",
+            "agent": "an agent orchestration dashboard on a wide monitor",
+            "code": "a developer workstation with code on screen and a keyboard",
+        }.get(category, "a modern technology workspace with a laptop and clean desk")
+    else:
+        visual_subject = f"{entity}"
 
-    templates = {
-        "environment": f"a real-world editorial scene where {visual_subject} is being used or built",
-        "message": f"one strong symbolic object representing {visual_subject} on generous negative space",
-        "focus": f"a premium close-up detail of the core hardware, interface, or material behind {visual_subject}",
-        "pov": f"an over-the-shoulder first-person view of a builder working with {visual_subject}",
+    # Story moment by event + angle
+    moments = {
+        "environment": {
+            "launch": f"a real workspace where {visual_subject} is being unveiled and used by a professional",
+            "explainer": f"a clean workspace scene that makes {visual_subject} the obvious subject",
+            "analysis": f"a professional setting where {visual_subject} is being studied alongside notes and charts",
+            "opinion": f"an editorial scene where {visual_subject} sits as the strong focal object",
+            "tutorial": f"a builder\'s hands-on workspace using {visual_subject} step by step",
+        },
+        "focus": {
+            "launch": f"a premium close-up of the core screen, chip, or interface behind {visual_subject} at the moment of use",
+            "explainer": f"a crisp detail shot of the single most important object or screen that represents {visual_subject}",
+            "analysis": f"a razor-sharp focal detail of {visual_subject} surrounded by subtle analytical cues",
+            "opinion": f"a bold macro detail of {visual_subject} isolated on clean negative space",
+            "tutorial": f"a tight close-up of {visual_subject} being used by a developer\'s hands",
+        },
+        "message": {
+            "launch": f"one strong symbolic object representing {visual_subject} placed on generous negative space",
+            "explainer": f"a single clean object or icon that instantly reads as {visual_subject}",
+            "analysis": f"one symbolic artifact for {visual_subject} surrounded by subtle connecting visual cues",
+            "opinion": f"a strong standalone symbol for {visual_subject}, editorial still-life",
+            "tutorial": f"the essential tool for {visual_subject} shown alone as a clean hero object",
+        },
+        "pov": {
+            "launch": f"an over-the-shoulder first-person view of a builder introducing {visual_subject} to a teammate",
+            "explainer": f"a first-person view of someone pointing at {visual_subject} on a screen",
+            "analysis": f"a builder\'s POV looking at {visual_subject} with notes and data nearby",
+            "opinion": f"a first-person perspective holding the one key object that represents {visual_subject}",
+            "tutorial": f"a developer\'s first-person view typing and using {visual_subject}",
+        },
     }
-    return templates.get(angle, templates["environment"])
+    return moments.get(angle, moments["environment"]).get(event, moments["environment"]["explainer"])
+
 
 
 def _build_visual_scene(
@@ -637,7 +670,7 @@ def _build_visual_scene(
     source_url: str = "",
     linkedin_post: str = "",
 ) -> str:
-    """Build a concrete, topic-aware scene description for an image angle."""
+    """Build a concrete, topic-aware, story-driven scene description."""
     angle = (angle or "environment").strip().lower()
     anchor = _visual_anchor(brief, linkedin_post, angle)
     entity = brief.get("entity") or brief.get("visual_subject") or "technology"
@@ -645,15 +678,34 @@ def _build_visual_scene(
     composition = brief.get("composition", "one dominant subject, readable thumbnail silhouette")
     context = brief.get("context", f"a professional technology setting relevant to {entity}")
 
-    if angle == "environment":
-        return f"Wide editorial establishing shot: {anchor}. {context}, {action}. {composition}. No text, no logos, no UI."
-    if angle == "message":
-        return f"Editorial still-life: {anchor}. {action}. {composition}. Clean magazine lighting. No text, no logos, no UI."
-    if angle == "focus":
-        return f"Premium product detail: {anchor}. Razor-sharp focal point, creamy bokeh. {composition}. No text, no logos, no UI."
-    if angle == "pov":
-        return f"First-person over-the-shoulder: {anchor}. {context}, {action}. Shallow depth of field, human scale. No text, no logos, no UI."
-    return f"Professional editorial hero shot of {entity}. {composition}. {context}. No text, no logos, no UI."
+    # Story-first templates, always text-free.
+    templates = {
+        "environment": (
+            f"Wide editorial establishing shot telling a story: {anchor}. "
+            f"{context}, {action}. {composition}. "
+            "No text, no logos, no words, no letters, no numbers, no UI labels, no watermarks."
+        ),
+        "message": (
+            f"Editorial still-life with a single symbolic story: {anchor}. "
+            f"{action}. {composition}. Clean magazine lighting. "
+            "No text, no logos, no words, no letters, no numbers, no UI labels, no watermarks."
+        ),
+        "focus": (
+            f"Premium detail shot that tells the story through material: {anchor}. "
+            f"Razor-sharp focal point, creamy bokeh. {composition}. "
+            "No text, no logos, no words, no letters, no numbers, no UI labels, no watermarks."
+        ),
+        "pov": (
+            f"First-person over-the-shoulder view of the human story: {anchor}. "
+            f"{context}, {action}. Shallow depth of field, human scale. "
+            "No text, no logos, no words, no letters, no numbers, no UI labels, no watermarks."
+        ),
+    }
+    return templates.get(
+        angle,
+        f"Professional editorial hero shot of {entity}. {composition}. {context}. "
+        "No text, no logos, no words, no letters, no numbers, no UI labels, no watermarks.",
+    )
 
 
 def _build_style(pillar: str, brief: dict | None = None, stock_style: bool = False) -> str:
@@ -661,11 +713,16 @@ def _build_style(pillar: str, brief: dict | None = None, stock_style: bool = Fal
     if stock_style:
         return (
             "authentic photorealistic stock photograph, clean professional business look, "
-            "subtle depth of field, natural color grading, no stylized illustration, no text or labels, "
-            "1.91:1 landscape"
+            "subtle depth of field, natural color grading, no stylized illustration, "
+            "no text, no logos, no words, no letters, no numbers, no UI labels, no watermarks, "
+            "1.91:1 LinkedIn landscape"
         )
     mood = brief.get("mood", "professional clear editorial photography") if brief else "professional clear editorial photography"
-    return f"{mood}, photorealistic, 1.91:1 LinkedIn landscape, no text, no logos, no UI, no watermarks"
+    return (
+        f"{mood}, photorealistic, 1.91:1 LinkedIn landscape, "
+        "no text, no logos, no words, no letters, no numbers, no UI labels, no watermarks"
+    )
+
 
 
 def prompt_for_post(
@@ -786,14 +843,16 @@ def _generate_with_fal(prompt: str, output_path: Path) -> Path | None:
     try:
         import fal_client
 
-        handler = fal_client.submit(
-            FAL_MODEL,
-            arguments={
-                "prompt": prompt,
-                "image_size": "landscape_16_9",
-                "num_inference_steps": 4,
-            },
-        )
+        # Default Fal model changed to ideogram/v3 for clean, text-free editorial visuals.
+        args: dict[str, any] = {"prompt": prompt}
+        if "ideogram" in FAL_MODEL:
+            args["aspect_ratio"] = "16:9"
+            args["magic_prompt_option"] = "auto"
+        else:
+            args["image_size"] = "landscape_16_9"
+            args["num_inference_steps"] = 4
+
+        handler = fal_client.submit(FAL_MODEL, arguments=args)
         result = handler.get()
         images = result.get("images", [])
         if not images:
@@ -803,7 +862,7 @@ def _generate_with_fal(prompt: str, output_path: Path) -> Path | None:
         if not img_url:
             logger.warning("Fal AI image URL missing")
             return None
-        resp = requests.get(img_url, timeout=(10, 30))
+        resp = requests.get(img_url, timeout=(10, 60))
         resp.raise_for_status()
         _save_response_image(resp, output_path)
         logger.info("Downloaded image from Fal AI: %s", output_path)
@@ -811,6 +870,7 @@ def _generate_with_fal(prompt: str, output_path: Path) -> Path | None:
     except Exception:
         logger.exception("Fal AI generation failed")
     return None
+
 
 
 def _generate_image(

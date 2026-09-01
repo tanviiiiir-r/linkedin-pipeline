@@ -545,7 +545,7 @@ _JS = '''(function() {
   }
   function normalizeUrl(url) {
     if (!url) return '';
-    let u = url.replace(/^//, '');
+    let u = url.replace(/^\\/\\//, '');
     return u.split('?')[0];
   }
 

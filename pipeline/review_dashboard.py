@@ -172,7 +172,7 @@ _HTML_TEMPLATE = '''<!DOCTYPE html>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Review — LinkedIn Drafts</title>
-  <link rel="stylesheet" href="assets/style.css?v=3" />
+  <link rel="stylesheet" href="assets/style.css?v=4" />
 </head>
 <body>
   <header class="site-header">
@@ -208,7 +208,7 @@ _HTML_TEMPLATE = '''<!DOCTYPE html>
     <p class="note">No post is published from this screen. Approve here, then run <code>python run.py publish --dry-run</code>.</p>
   </footer>
 
-  <script src="assets/app.js?v=3"></script>
+  <script src="assets/app.js?v=4"></script>
 </body>
 </html>'''
 

@@ -41,3 +41,22 @@ if __name__ == "__main__":
     test_save_and_load()
     test_list_items()
     print("storage tests passed")
+
+
+def test_item_from_row_parses_image_candidates():
+    from pipeline.storage import _item_from_row, Item
+    class FakeRow:
+        def __init__(self, d): self.d = d
+        def __getitem__(self, k): return self.d[k]
+        def keys(self): return list(self.d.keys())
+    row = FakeRow({
+        'id': 'x', 'source_name': 's', 'source_url': 'u', 'item_url': 'u', 'item_title': 't',
+        'item_author': '', 'published_at': '', 'collected_at': 'now', 'source_type': 'rss',
+        'content_type': 'article', 'summary': '', 'key_claims': '[]', 'raw_content': '',
+        'pillar_candidates': '[]', 'topics': '[]', 'status': 'raw', 'signal_strength': 'auto',
+        'url_hash': 'x', 'image_path': '', 'queue_type': 'breaking', 'expires_at': None,
+        'engagement': None, 'image_source': '', 'image_candidates': '["a.jpg"]',
+    })
+    item = _item_from_row(row)
+    assert isinstance(item.image_candidates, list)
+    assert item.image_candidates == ['a.jpg']

@@ -196,6 +196,16 @@ def _draft_to_json(draft: Draft, analysis: dict | None = None, status: str = "pe
             candidates_rel.append(cand)
             candidate_sources.append(label)
 
+    # Ensure active image URL matches the selected candidate if possible
+    active_url = f"/{image_rel}" if image_rel else None
+    if candidates_rel and draft.image_path:
+        active_path = Path(draft.image_path)
+        active_name = active_path.name
+        for cand in candidates_rel:
+            if cand.endswith(active_name):
+                active_url = f"/{cand}"
+                break
+
     out = {
         "item_id": draft.item_id,
         "title": draft.title,
@@ -203,7 +213,7 @@ def _draft_to_json(draft: Draft, analysis: dict | None = None, status: str = "pe
         "source_url": draft.source_url,
         "linkedin_post": draft.linkedin_post,
         "hashtags": draft.hashtags,
-        "image_url": f"/{image_rel}" if image_rel else None,
+        "image_url": active_url,
         "image_source": draft.image_source,
         "image_candidates": candidates_rel,
         "image_candidate_sources": candidate_sources,
@@ -438,9 +448,51 @@ Return ONLY the rewritten LinkedIn post text (no markdown, no JSON, no explanati
         except OSError as exc:
             _json_response(self, 500, {"ok": False, "error": f"copy failed: {exc}"})
             return
+        # Determine source label and angle from candidate path
+        from pipeline.analytics import log_image_selection
+        cand_lower = str(candidate_path).lower()
+        selected_source = "article"
+        angle = ""
+        if "pexels" in cand_lower or "unsplash" in cand_lower:
+            selected_source = "stock"
+        elif "ai_" in cand_lower:
+            selected_source = "ai"
+            angle = (candidate_path.stem.split("_")[-1] if "_" in candidate_path.stem else "")
+        elif "ai_stock" in cand_lower:
+            selected_source = "ai stock"
+
+        # Preserve original source label if available
+        if draft.image_candidates and str(candidate_path) in draft.image_candidates:
+            idx = draft.image_candidates.index(str(candidate_path))
+            sources = getattr(draft, "image_candidate_sources", []) or []
+            if sources and idx < len(sources):
+                selected_source = sources[idx]
+
         draft.image_path = str(dest)
-        draft.image_source = "article"
+        draft.image_source = selected_source
         _persist_draft(draft, path)
+
+        # Reorder candidates so selected is first (preserve sources)
+        if draft.image_candidates and str(candidate_path) in draft.image_candidates:
+            idx = draft.image_candidates.index(str(candidate_path))
+            selected = draft.image_candidates.pop(idx)
+            draft.image_candidates.insert(0, selected)
+            if draft.image_candidate_sources:
+                src_label = draft.image_candidate_sources.pop(idx)
+                draft.image_candidate_sources.insert(0, src_label)
+            _persist_draft(draft, path)
+
+        log_image_selection(
+            item_id=draft.item_id,
+            pillar=draft.pillar,
+            title=draft.title,
+            source_url=draft.source_url,
+            selected_candidate=str(candidate_path),
+            selected_source=selected_source,
+            angle=angle,
+            candidate_count=len(draft.image_candidates or []),
+            rank=0,
+        )
         # Copy into review images dir for dashboard preview
         review_dest = REVIEW_IMAGES_DIR / f"{item_id}{ext}"
         REVIEW_IMAGES_DIR.mkdir(parents=True, exist_ok=True)

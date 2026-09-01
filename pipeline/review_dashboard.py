@@ -544,7 +544,7 @@ _JS = '''(function() {
   }
   function normalizeUrl(url) {
     if (!url) return '';
-    let u = url.replace(/^\//, '');
+    let u = url.replace(/^//, '');
     return u.split('?')[0];
   }
 
@@ -578,7 +578,7 @@ _JS = '''(function() {
 
   function activeImageUrl(draft) {
     if (draft.image_url) return normalizeUrl(draft.image_url);
-    const m = (draft.image_path || '').match(/(\\.[^.\\/]+)$/);
+    const m = (draft.image_path || '').match(/(\\.[^./]+)$/);
     const ext = m ? m[1] : '.jpg';
     return 'images/' + draft.item_id + ext;
   }

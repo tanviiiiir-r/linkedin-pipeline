@@ -276,9 +276,9 @@ def _item_from_row(row) -> Item:
     for key in keys:
         value = row[key]
         if value is None:
-            data[key] = [] if key in ("key_claims", "pillar_candidates", "topics") else "" if key in ("reddit_permalink",) else 0 if key in ("reddit_score", "reddit_comments") else value
+            data[key] = [] if key in ("key_claims", "pillar_candidates", "topics", "image_candidates") else "" if key in ("reddit_permalink",) else 0 if key in ("reddit_score", "reddit_comments") else value
             continue
-        if key in ("key_claims", "pillar_candidates", "topics"):
+        if key in ("key_claims", "pillar_candidates", "topics", "image_candidates"):
             try:
                 data[key] = json.loads(value)
             except (json.JSONDecodeError, TypeError):
@@ -296,7 +296,7 @@ def _item_from_row(row) -> Item:
 def _json_loads(key: str, value):
     if value is None:
         return []
-    if key in ("key_claims", "pillar_candidates", "topics"):
+    if key in ("key_claims", "pillar_candidates", "topics", "image_candidates"):
         try:
             return json.loads(value)
         except json.JSONDecodeError:

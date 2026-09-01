@@ -159,7 +159,7 @@ def _candidate_source_label(candidate: str) -> str:
     if any(x in lower for x in ("unsplash", "pexels")):
         return "stock"
     if "ai_stock" in lower:
-        return "AI stock"
+        return "AI fallback"
     if "environment" in lower:
         return "AI · environment"
     if "message" in lower:
@@ -459,7 +459,7 @@ Return ONLY the rewritten LinkedIn post text (no markdown, no JSON, no explanati
             selected_source = "ai"
             angle = (candidate_path.stem.split("_")[-1] if "_" in candidate_path.stem else "")
         elif "ai_stock" in cand_lower:
-            selected_source = "ai stock"
+            selected_source = "ai fallback"
 
         # Preserve original source label if available
         if draft.image_candidates and str(candidate_path) in draft.image_candidates:

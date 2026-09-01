@@ -887,7 +887,7 @@ def _generate_ai_stock_photo(
 ) -> Path | None:
     """Generate a photorealistic stock-style image when real stock APIs fail."""
     prompt = prompt_for_post(day, pillar, title, linkedin_post, hashtags, stock_style=True, source_url=source_url)
-    logger.info("AI stock photo prompt: %s", prompt)
+    logger.info("AI fallback photo prompt: %s", prompt)
     return _generate_image(prompt, output_path, provider, seed=seed, model="flux-realism")
 
 
@@ -1135,7 +1135,7 @@ def candidates_for_post(
     brief = _visual_brief(title, linkedin_post, hashtags, item_url, pillar)
     scored: list[tuple[float, Path, str]] = []
     for idx, p in enumerate(non_ai + ai):
-        source_label = "article" if p in non_ai[:1] else ("stock" if "pexels" in p.name else "ai")
+        source_label = "article" if p in non_ai[:1] else ("stock" if ("pexels" in p.name or "unsplash" in p.name) else "ai")
         angle = chosen_angles[idx - len(non_ai)] if idx >= len(non_ai) else ""
         score = _score_candidate(p, brief, source_label, angle)
         scored.append((score, p, source_label))

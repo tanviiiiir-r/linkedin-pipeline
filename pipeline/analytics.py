@@ -6,7 +6,6 @@ image sources and visual angles perform best per pillar.
 import json
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 
 from config.settings import DATA_DIR
 

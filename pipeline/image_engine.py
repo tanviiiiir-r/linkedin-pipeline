@@ -958,7 +958,8 @@ def _save_pexels_cache(query: str, index: int, output_path: Path, meta: dict) ->
 
     cache_path = _pexels_cache_key(query, index)
     meta_path = _pexels_metadata_path(query, index)
-    shutil.copy2(output_path, cache_path)
+    if output_path.resolve() != cache_path.resolve():
+        shutil.copy2(output_path, cache_path)
     meta_path.write_text(json.dumps(meta, indent=2))
 
 

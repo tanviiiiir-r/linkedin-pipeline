@@ -172,7 +172,7 @@ _HTML_TEMPLATE = '''<!DOCTYPE html>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Review — LinkedIn Drafts</title>
-  <link rel="stylesheet" href="assets/style.css?v=4" />
+  <link rel="stylesheet" href="assets/style.css?v=5" />
 </head>
 <body>
   <header class="site-header">
@@ -208,7 +208,7 @@ _HTML_TEMPLATE = '''<!DOCTYPE html>
     <p class="note">No post is published from this screen. Approve here, then run <code>python run.py publish --dry-run</code>.</p>
   </footer>
 
-  <script src="assets/app.js?v=4"></script>
+  <script src="assets/app.js?v=5"></script>
 </body>
 </html>'''
 
@@ -584,6 +584,13 @@ _JS = '''(function() {
     return 'images/' + draft.item_id + ext;
   }
 
+  function normalizeCandidateUrl(url) {
+    if (!url) return '';
+    let u = url.replace(/^\\/\\//, '');
+    if (u.startsWith('/')) u = u.slice(1);
+    return u;
+  }
+
   function setStatus(html, type) {
     const app = document.getElementById('app');
     let banner = app.querySelector('.status-banner');
@@ -634,7 +641,7 @@ _JS = '''(function() {
     const sources = draft.image_candidate_sources || [];
     visible.forEach((c, idx) => {
       const thumb = document.createElement('div');
-      const isActive = normalizeUrl(c) === normalizeUrl(active);
+      const isActive = normalizeCandidateUrl(c) === normalizeCandidateUrl(active);
       thumb.className = 'candidate-thumb' + (isActive ? ' active' : '');
       thumb.title = candidateSourceLabel(c, sources, idx);
       thumb.onclick = () => openImageGallery(draft.item_id);
@@ -998,7 +1005,7 @@ _JS = '''(function() {
       setStatus('<span class="spinner"></span> Selecting image…', 'running');
       const data = await postApi('/select-image', {item_id: id, candidate});
       if (!data.ok) throw new Error(data.error || 'selection failed');
-      updateActiveImage(id, data.image_url ? normalizeUrl(data.image_url) : normalizeUrl(candidate));
+      updateActiveImage(id, data.image_url ? normalizeCandidateUrl(data.image_url) : normalizeCandidateUrl(candidate));
       setStatus('Image selected', 'success');
       setTimeout(clearStatus, 2000);
       if (fromGallery) {
@@ -1136,7 +1143,7 @@ _JS = '''(function() {
     const sources = draft.image_candidate_sources || [];
     draft.image_candidates.forEach((c, idx) => {
       const card = document.createElement('div');
-      const isActive = normalizeUrl(c) === normalizeUrl(active);
+      const isActive = normalizeCandidateUrl(c) === normalizeCandidateUrl(active);
       card.className = 'gallery-card' + (isActive ? ' active' : '');
       card.dataset.candidate = c;
       const img = document.createElement('img');
@@ -1232,13 +1239,13 @@ _JS = '''(function() {
   function updateActiveImage(draftId, candidateUrl) {
     const card = document.querySelector(`article[data-item-id="${draftId}"]`);
     if (!card) return;
-    const normActive = normalizeUrl(candidateUrl);
+    const normActive = normalizeCandidateUrl(candidateUrl);
     const imgBox = card.querySelector('.ln-image img');
     if (imgBox) imgBox.src = candidateUrl + '?t=' + Date.now();
     // Mark correct thumb active
     card.querySelectorAll('.candidate-thumb').forEach((thumb) => {
       const img = thumb.querySelector('img');
-      const normThumb = img ? normalizeUrl(img.src) : '';
+      const normThumb = img ? normalizeCandidateUrl(img.src) : '';
       if (normThumb && normThumb === normActive) {
         thumb.classList.add('active');
       } else {
@@ -1250,7 +1257,7 @@ _JS = '''(function() {
     if (modal) {
       modal.querySelectorAll('.gallery-card').forEach(card => {
         const selectBtn = card.querySelector('.btn.save');
-        const normCard = normalizeUrl(card.dataset.candidate);
+        const normCard = normalizeCandidateUrl(card.dataset.candidate);
         if (normCard === normActive) {
           card.classList.add('active');
           if (selectBtn) { selectBtn.textContent = 'Selected'; selectBtn.disabled = true; }

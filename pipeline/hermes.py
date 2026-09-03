@@ -33,7 +33,7 @@ from pipeline.content_analyst import run_analysis
 from pipeline.dedupe import find_duplicate
 from pipeline.drafting import Draft, compile_newsletter, draft_item, load_drafts, save_draft
 from pipeline.drafting_v2 import draft_item_v2
-from pipeline.image_engine import candidates_for_post
+from pipeline.image_engine import IMAGE_PROVIDER, candidates_for_post
 from pipeline.invariants import run_health_checks
 from pipeline.log import setup_logging
 from pipeline.publishers.composio import (
@@ -402,9 +402,26 @@ def cmd_daily(args) -> int:
     worthy_items = [i for i in list_items(status="worthy", limit=args.draft_limit) if i.status == "worthy"]
     drafted = 0
     drafts: list[Draft] = []
+    image_provider = IMAGE_PROVIDER  # env default (fal)
     for item in worthy_items:
         score = score_item(item)
         draft = draft_item(item, score)
+        # Build candidate set: 2 non-AI + 2 AI
+        active_path, candidate_paths, img_source, candidate_sources = candidates_for_post(
+            item_url=item.item_url,
+            title=draft.title,
+            day=day_plan().day_name,
+            pillar=score.pillar or draft.pillar,
+            linkedin_post=draft.linkedin_post,
+            hashtags=" ".join(draft.hashtags),
+            item_id=item.id,
+            provider=image_provider,
+        )
+        if active_path:
+            draft.image_path = str(active_path)
+            draft.image_source = img_source
+            draft.image_candidates = candidate_paths
+            draft.image_candidate_sources = candidate_sources
         save_draft(draft, QUEUE_DIR)
         update_status(item.item_url, "drafted")
         drafts.append(draft)

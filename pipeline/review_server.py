@@ -26,6 +26,7 @@ from pipeline.approval import (
     list_scheduled,
     skip_draft,
 )
+from pipeline.content_analyst import accuracy_score, perfection_score, relevance_score, _days_old
 from pipeline.drafting import Draft, _draft_markdown, _parse_draft_markdown
 from pipeline.image_engine import IMAGE_DIR, image_for_post
 from pipeline.llm_client import chat, is_available
@@ -37,6 +38,37 @@ ensure_dirs()
 REVIEW_IMAGES_DIR = REVIEW_DIR / "images"
 API_PREFIX = "/api"
 AUTH_HEADER_PREFIX = "Basic "
+
+
+def _analyze_draft(draft: Draft) -> dict:
+    """Compute analysis scores for a draft."""
+    try:
+        plan = day_plan()
+        item = load_item(draft.source_url)
+        age = _days_old(item.published_at if item else None)
+        rel = relevance_score(item, plan, age)
+        acc = accuracy_score(item)
+        perf, issues, notes = perfection_score(draft, plan, use_llm=False)
+        action = "keep"
+        if acc < 60:
+            action = "update_source"
+        elif rel < 60:
+            action = "skip"
+        elif perf < 60:
+            action = "rewrite_draft"
+        elif not draft.image_path:
+            action = "replace_image"
+        return {
+            "relevance_score": rel,
+            "accuracy_score": acc,
+            "perfection_score": perf,
+            "issues": issues,
+            "notes": notes,
+            "proposed_action": action,
+        }
+    except Exception:
+        logger.exception("Failed to analyze draft %s", draft.item_id)
+        return {}
 
 
 def _require_auth(handler: BaseHTTPRequestHandler) -> bool:
@@ -159,7 +191,7 @@ def _candidate_source_label(candidate: str) -> str:
         return "article"
     if any(x in lower for x in ("unsplash", "pexels")):
         return "stock"
-    if "ai_stock" in lower:
+    if "ai_stock" in lower or "fallback" in lower:
         return "AI fallback"
     if "environment" in lower:
         return "AI · environment"
@@ -202,10 +234,13 @@ def _draft_to_json(draft: Draft, analysis: dict | None = None, status: str = "pe
     if candidates_rel and draft.image_path:
         active_path = Path(draft.image_path)
         active_name = active_path.name
-        for cand in candidates_rel:
-            if cand.endswith(active_name):
-                active_url = f"/{cand}"
+        for idx, cand in enumerate(candidates_rel):
+            if Path(cand).name == active_name:
+                active_url = f"/{cand.lstrip('/')}"
                 break
+
+    # Normalize all candidate URLs to start with / for consistency
+    candidates_rel = [f"/{c.lstrip('/')}" for c in candidates_rel]
 
     out = {
         "item_id": draft.item_id,
@@ -302,6 +337,8 @@ class _Handler(BaseHTTPRequestHandler):
         analysis_map = {}
         total = len(drafts)
         page = drafts[offset : offset + limit]
+        for d in page:
+            analysis_map[d.item_id] = _analyze_draft(d)
         out = [_draft_to_json(d, analysis_map.get(d.item_id), status=status_label) for d in page]
         _json_response(
             self,

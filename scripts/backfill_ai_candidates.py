@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Regenerate AI image candidates for pending drafts using the latest prompt engineering.
 
 This backfill keeps non-AI candidates (article/OG/stock) and replaces only the
@@ -15,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from config.settings import DATA_DIR, QUEUE_DIR, ensure_dirs
 from pipeline.approval import list_pending
-from pipeline.drafting import Draft, save_draft
+from pipeline.drafting import save_draft
 from pipeline.image_engine import candidates_for_post
 from pipeline.log import setup_logging
 

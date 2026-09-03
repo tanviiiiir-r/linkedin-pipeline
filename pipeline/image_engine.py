@@ -5,14 +5,15 @@ Candidate policy:
 - Up to 2 AI-generated candidates from different angles (environment, message, focus, POV).
 - Dashboard lets the operator preview all 4 and select the active image for posting.
 """
+import datetime
 import html
 import logging
 import os
 import re
 import urllib.parse
-import datetime
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import requests
 from PIL import Image
@@ -344,8 +345,8 @@ def _extract_visual_keywords(title: str, linkedin_post: str, hashtags: str, sour
             generic_hosts = {"reddit", "youtube", "arxiv", "medium", "substack", "github"}
             if host and host not in generic_hosts and host not in topics:
                 domain = host
-        except Exception:
-            pass
+        except (ValueError, AttributeError) as exc:
+            logger.debug("Domain parsing failed for %s: %s", source_url, exc)
     if domain:
         keywords = f"{keywords}, {domain}"
 
@@ -599,7 +600,8 @@ def _dhash_image(path: Path, size: int = 8) -> str | None:
                 right = pixels[row * (size + 1) + col + 1]
                 diff.append(left > right)
         return hex(int("".join("1" if b else "0" for b in diff), 2))[2:].zfill(size * size // 4)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("dHash failed for %s: %s", path, exc)
         return None
 
 def _visual_anchor(brief: dict, linkedin_post: str = "", angle: str = "") -> str:
@@ -844,7 +846,7 @@ def _generate_with_fal(prompt: str, output_path: Path) -> Path | None:
         import fal_client
 
         # Default Fal model changed to ideogram/v3 for clean, text-free editorial visuals.
-        args: dict[str, any] = {"prompt": prompt}
+        args: dict[str, Any] = {"prompt": prompt}
         if "ideogram" in FAL_MODEL:
             args["aspect_ratio"] = "16:9"
             args["magic_prompt_option"] = "auto"
@@ -1029,7 +1031,7 @@ def _search_pexels_single(query: str, output_path: Path, index: int = 0) -> tupl
             "source_url": photo.get("url", ""),
             "dimensions": {"width": photo.get("width", 0), "height": photo.get("height", 0)},
             "status": "ok",
-            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         _save_pexels_cache(query, i, cached_path, meta)
 

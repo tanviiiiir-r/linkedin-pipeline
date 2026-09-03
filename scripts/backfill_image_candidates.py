@@ -18,9 +18,8 @@ repo_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(repo_root))
 
 from config.calendar import day_plan
-from config.settings import DATA_DIR, QUEUE_DIR
-from pipeline.approval import list_pending, _persist_draft
-from pipeline.drafting import _parse_draft_markdown
+from config.settings import QUEUE_DIR
+from pipeline.approval import _persist_draft, list_pending
 from pipeline.image_engine import candidates_for_post
 from pipeline.log import setup_logging
 

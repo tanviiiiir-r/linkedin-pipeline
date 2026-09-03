@@ -1,5 +1,7 @@
 """Human-in-the-loop approval queue."""
+import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -20,7 +22,7 @@ def _parse_planned_markdown(path: Path) -> Draft | None:
         text = path.read_text()
     except OSError:
         return None
-    frontmatter, body = _split_frontmatter(text)
+    frontmatter, _body = _split_frontmatter(text)
     if not frontmatter:
         return None
     try:

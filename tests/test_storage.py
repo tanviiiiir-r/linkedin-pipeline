@@ -44,7 +44,7 @@ if __name__ == "__main__":
 
 
 def test_item_from_row_parses_image_candidates():
-    from pipeline.storage import _item_from_row, Item
+    from pipeline.storage import _item_from_row
     class FakeRow:
         def __init__(self, d): self.d = d
         def __getitem__(self, k): return self.d[k]

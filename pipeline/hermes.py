@@ -23,6 +23,7 @@ from config.settings import (
     SOURCES_CSV,
     ensure_dirs,
 )
+from pipeline.analytics import log_post_metadata
 from pipeline.approval import approve_draft, list_pending, list_ready_to_publish, mark_published
 from pipeline.calendar import select_for_today
 from pipeline.checkpoints import write_daily_checkpoint
@@ -404,10 +405,27 @@ def cmd_daily(args) -> int:
     drafts: list[Draft] = []
     for item in worthy_items:
         score = score_item(item)
-        draft = draft_item(item, score)
+        try:
+            plan = day_plan()
+            draft = draft_item_v2(item, score, day_plan=plan)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LLM draft failed for %s: %s; falling back to rule-based", item.id, exc)
+            draft = draft_item(item, score)
         save_draft(draft, QUEUE_DIR)
         update_status(item.item_url, "drafted")
         drafts.append(draft)
+        try:
+            log_post_metadata(
+                item_id=draft.item_id,
+                pillar=draft.pillar,
+                narrative_type="v2_" + day_plan().post_type,
+                hook_type="llm",
+                word_count=len(draft.linkedin_post.split()),
+                cta_type="question" if draft.linkedin_post.rstrip().endswith("?") else "takeaway",
+                draft_version="v2",
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to log caption metadata for %s", draft.item_id)
         drafted += 1
     print(f"Drafted {drafted} items")
 

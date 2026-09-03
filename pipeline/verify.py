@@ -88,6 +88,173 @@ def _has_specific_topics(hashtags: list[str], topics: list[str], day_plan_hashta
 
 
 
+
+
+# --- Human voice / storytelling upgrade helpers --------------------------------
+_TEMPLATE_PHRASES = [
+    r"Why builders should care",
+    r"this is the kind of signal that shifts how we design, deploy, and secure AI systems",
+    r"Watch it, experiment with it, and share what breaks",
+    r"Builder memo:",
+    r"What changed:",
+]
+
+_GENERIC_PATTERNS = [
+    r"game[- ]?changer",
+    r"revolutionary",
+    r"revolutionize",
+    r"disruptive",
+    r"paradigm shift",
+    r"cutting[- ]edge",
+    r"next[- ]gen",
+    r"transformative",
+    r"unleash",
+    r"leverage",
+    r"unlock",
+    r"synergy",
+    r"thought leader",
+    r"deep dive",
+    r"ecosystem",
+]
+
+_FABRICATED_FIRST_PERSON = [
+    r"\bI tested\b",
+    r"\bI built\b",
+    r"\bI spent the weekend\b",
+    r"\bI discovered\b",
+    r"\bI talked to\b",
+    r"\bI deployed\b",
+    r"\bI shipped\b",
+    r"\bmy team\b",
+    r"\bwe deployed\b",
+    r"\bwe shipped\b",
+    r"\bwe built\b",
+    r"\bIn my experience\b",
+    r"\bI keep seeing\b",
+]
+
+_POV_SIGNALS = [
+    r"\bmy read is\b",
+    r"\bI think\b",
+    r"\bI disagree\b",
+    r"\bI'm less interested in\b",
+    r"\bthe interesting part is\b",
+    r"\bwhat surprised me\b",
+    r"\bthe detail I'd watch\b",
+    r"\bthat sounds small, but\b",
+    r"\bthe obvious takeaway\b",
+    r"\bthe more important signal\b",
+    r"\beveryone is focusing on\b",
+    r"\bI'm more interested in\b",
+    r"\bhere's where I disagree\b",
+    r"\bhonestly\b",
+    r"\bthe weird part is\b",
+    r"\bwhat caught my attention\b",
+]
+
+_TRANSITION_WORDS = [
+    "but", "yet", "instead", "actually", "so", "then", "because", "which means",
+    "that's why", "here's the part", "the surprising part", "the practical shift",
+]
+
+
+def _has_template_phrases(text: str) -> bool:
+    lower = text.lower()
+    for p in _TEMPLATE_PHRASES:
+        if re.search(p, lower, re.IGNORECASE):
+            return True
+    return False
+
+
+def _count_generic_patterns(text: str) -> int:
+    return sum(1 for p in _GENERIC_PATTERNS if re.search(p, text, re.IGNORECASE))
+
+
+def _has_fabricated_experience(text: str) -> bool:
+    return any(re.search(p, text, re.IGNORECASE) for p in _FABRICATED_FIRST_PERSON)
+
+
+def _has_point_of_view(text: str) -> bool:
+    return any(re.search(p, text, re.IGNORECASE) for p in _POV_SIGNALS)
+
+
+def _has_specificity(text: str) -> bool:
+    if re.search(r"\b\d+(?:\.\d+)?%?\b", text):
+        return True
+    return bool(re.search(r"\b(?:OpenAI|Anthropic|Google|Meta|Microsoft|Amazon|NVIDIA|AWS|Cloudflare|GitHub|arXiv|Reddit|Hacker News|LangChain|Llama|GPT-4|Claude|Mistral|Gemini|Pytorch|TensorFlow|Kubernetes|Docker|API|SDK|MCP|agent|prompt injection|jailbreak|RAG|fine-tune|LoRA|quantization|latency|cost)\b", text, re.IGNORECASE))
+
+
+def _has_narrative_flow(text: str) -> bool:
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if len(paragraphs) < 2:
+        return False
+    lower = text.lower()
+    return any(t in lower for t in _TRANSITION_WORDS)
+
+
+def _has_repetition(text: str) -> bool:
+    """Detect repeated phrases across paragraphs; ignore source URL and short lines."""
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if len(paragraphs) < 2:
+        return False
+    seen: set[tuple[str, ...]] = set()
+    for p in paragraphs:
+        # Drop URLs and markdown headings; they repeat source URL naturally
+        cleaned = re.sub(r"https?://\S+|^#+\s*|\*\*[^*]+\*\*:\s*", "", p).strip()
+        if not cleaned:
+            continue
+        words = [w.lower() for w in re.findall(r"\b\w+\b", cleaned) if len(w) > 2]
+        if len(words) < 8:
+            continue
+        ngrams = {tuple(words[i:i + 4]) for i in range(len(words) - 3)}
+        dup = seen & ngrams
+        if len(dup) >= 2:
+            return True
+        seen |= ngrams
+    return False
+
+
+def _source_grounding_score(draft: Draft, item: Item | None) -> float:
+    if item is None:
+        return 0.5
+    source = " ".join(
+        [
+            item.item_title or "",
+            item.summary or "",
+            " ".join(item.key_claims or []),
+            item.raw_content or "",
+        ]
+    )
+    if not source.strip():
+        return 0.5
+    draft_text = " ".join(
+        [
+            draft.linkedin_post or "",
+            draft.newsletter_section or "",
+            draft.short_pill or "",
+            draft.forward_pill or "",
+            draft.narrative_pill or "",
+        ]
+    )
+    draft_words = set(re.findall(r"\b\w+\b", draft_text.lower()))
+    source_words = set(re.findall(r"\b\w+\b", source.lower()))
+    if not draft_words:
+        return 0.0
+    stop = {
+        "the", "a", "an", "is", "are", "was", "were", "this", "that", "it", "to", "of",
+        "and", "in", "on", "for", "with", "as", "at", "by", "from", "or", "but", "not",
+        "be", "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "should", "can", "may", "might", "about", "up", "out", "if", "so", "than", "then",
+        "them", "they", "their", "we", "my", "i", "you", "me", "read", "more", "http",
+        "https", "com", "www", "ai", "new", "just", "now", "like", "one", "two", "get",
+        "make", "way", "what", "how", "why", "when", "where", "who",
+    }
+    meaningful = draft_words - stop
+    if not meaningful:
+        return 0.0
+    overlap = meaningful & source_words
+    return len(overlap) / len(meaningful)
+
 def _extract_claims_from_draft(text: str) -> list[str]:
     """Pull likely factual claims out of a draft for verification."""
     claims = []
@@ -173,7 +340,7 @@ def _number_tolerated(number: str, source_text: str) -> bool:
     return 2020 <= val <= 2030
 
 
-def verify_draft(draft: Draft) -> VerifyResult:
+def verify_draft(draft: Draft, item: Item | None = None) -> VerifyResult:
     """Verify a draft against pipeline quality rules."""
     text = f"{draft.linkedin_post}\n{draft.newsletter_section}\n{draft.short_pill}\n{draft.forward_pill}\n{draft.narrative_pill}"
 
@@ -265,6 +432,53 @@ def verify_draft(draft: Draft) -> VerifyResult:
         checks["no_hallucinated_numbers"] = False
         score -= 5
         reasons.append("Claim verification check failed")
+
+    # 10. Human voice / storytelling checks
+    checks["not_generic_template"] = not _has_template_phrases(text)
+    if not checks["not_generic_template"]:
+        score -= 15
+        reasons.append("Post uses a generic template phrase such as 'Why builders should care'")
+
+    checks["low_genericness"] = _count_generic_patterns(text) == 0
+    if not checks["low_genericness"]:
+        score -= 10
+        reasons.append("Generic hype words detected (e.g., revolutionary, game-changer)")
+
+    checks["has_point_of_view"] = _has_point_of_view(text)
+    if not checks["has_point_of_view"]:
+        score -= 10
+        reasons.append("Missing point of view or interpretation; reads like a summary")
+
+    checks["has_specificity"] = _has_specificity(text)
+    if not checks["has_specificity"]:
+        score -= 10
+        reasons.append("Draft lacks specific source-grounded details")
+
+    checks["has_narrative_flow"] = _has_narrative_flow(text)
+    if not checks["has_narrative_flow"]:
+        score -= 6
+        reasons.append("Narrative flow is weak; add story-like progression")
+
+    checks["not_repetitive"] = not _has_repetition(text)
+    if not checks["not_repetitive"]:
+        score -= 8
+        reasons.append("Repetition detected across paragraphs")
+
+    checks["no_fabricated_experience"] = not _has_fabricated_experience(text)
+    if not checks["no_fabricated_experience"]:
+        score -= 20
+        reasons.append("Fabricated first-person experience detected; remove claims like 'I tested' or 'my team' unless verified")
+
+    if item is None:
+        try:
+            from pipeline.storage import load_item
+            item = load_item(draft.source_url)
+        except (RuntimeError, ValueError, TypeError, FileNotFoundError, OSError):
+            item = None
+    checks["source_grounded"] = _source_grounding_score(draft, item) >= 0.25
+    if not checks["source_grounded"]:
+        score -= 12
+        reasons.append("Draft is weakly grounded in the source text")
 
     score = max(0, min(100, score))
 
